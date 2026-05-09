@@ -6,10 +6,11 @@
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "tsx watch server/index.ts",
-    "dev:client": "cd client && vite",
-    "build": "cd client && npx vite build && cd .. && npx tsc -p tsconfig.server.json",
-    "start": "node dist/server/index.js",
-    "postinstall": "cd client && npm install"
+    "dev:client": "cd client && npx vite",
+    "build": "npm run build:client && npm run build:server",
+    "build:client": "cd client && npm install && npx vite build",
+    "build:server": "npx tsc -p tsconfig.server.json",
+    "start": "node dist/server/index.js"
   },
   "dependencies": {
     "@trpc/server": "^10.45.0",
