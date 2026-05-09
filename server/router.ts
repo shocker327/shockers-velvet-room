@@ -6,9 +6,10 @@ import { companions } from './companions';
 
 const t = initTRPC.create();
 
+// ─── Chat client (OpenRouter) ─────────────────────────────────────────────────
 // OpenRouter is OpenAI-API-compatible — just swap baseURL and key.
 // Falls back to OPENAI_API_KEY if OPENROUTER_API_KEY is not set.
-const openai = new OpenAI({
+const chatClient = new OpenAI({
   baseURL: 'https://openrouter.ai/api/v1',
   apiKey: process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY,
   defaultHeaders: {
@@ -20,6 +21,14 @@ const openai = new OpenAI({
 // Model can be overridden via MODEL_NAME env var; defaults to an
 // uncensored Mistral model available on OpenRouter.
 const MODEL = process.env.MODEL_NAME || 'mistralai/mistral-small-3.1-24b-instruct';
+
+// ─── TTS client (OpenAI directly) ────────────────────────────────────────────
+// OpenRouter does not support TTS, so we call OpenAI's TTS API directly.
+// Requires OPENAI_API_KEY env var.
+const ttsClient = new OpenAI({
+  baseURL: 'https://api.openai.com/v1',
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 export const appRouter = t.router({
   // Get all companions
@@ -103,7 +112,7 @@ export const appRouter = t.router({
       ];
 
       try {
-        const completion = await openai.chat.completions.create({
+        const completion = await chatClient.chat.completions.create({
           model: MODEL,
           messages,
           max_tokens: 1000,
@@ -119,6 +128,42 @@ export const appRouter = t.router({
       } catch (error: any) {
         const errorMsg = 'I seem to be having trouble connecting right now. Please try again in a moment.';
         return { role: 'assistant' as const, content: errorMsg };
+      }
+    }),
+
+  // ─── Text-to-Speech ───────────────────────────────────────────────────────
+  // Generates audio from text using OpenAI's TTS API.
+  // Returns base64-encoded MP3 audio.
+  textToSpeech: t.procedure
+    .input(
+      z.object({
+        text: z.string().max(4096),
+        companionId: z.string(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const companion = companions.find((c) => c.id === input.companionId);
+      if (!companion) throw new Error('Companion not found');
+
+      if (!process.env.OPENAI_API_KEY) {
+        throw new Error('TTS is not configured — OPENAI_API_KEY is required for voice messages.');
+      }
+
+      try {
+        const response = await ttsClient.audio.speech.create({
+          model: 'tts-1',
+          voice: companion.voice,
+          input: input.text,
+          response_format: 'mp3',
+        });
+
+        // Convert the response to a buffer then base64
+        const arrayBuffer = await response.arrayBuffer();
+        const base64 = Buffer.from(arrayBuffer).toString('base64');
+
+        return { audio: base64, format: 'mp3' };
+      } catch (error: any) {
+        throw new Error('Failed to generate voice message. Please try again.');
       }
     }),
 

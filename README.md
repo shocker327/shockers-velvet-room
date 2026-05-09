@@ -18,6 +18,7 @@
 - 💰 Pricing page with waitlist signup
 - 📜 Terms of Service & Privacy Policy
 - 🎨 Dark luxury design with gold accents
+- 🔊 Voice messages — each companion has a unique TTS voice (OpenAI TTS)
 
 ## Getting Started
 
@@ -26,6 +27,7 @@
 - Node.js 18+
 - npm
 - An [OpenRouter](https://openrouter.ai) API key (free tier available)
+- An [OpenAI](https://platform.openai.com) API key (for TTS voice messages)
 
 ### Installation
 
@@ -39,6 +41,7 @@ npm install
 
 # Set environment variables
 export OPENROUTER_API_KEY=your_openrouter_api_key_here
+export OPENAI_API_KEY=your_openai_api_key_here  # for TTS voice messages
 
 # Run in development mode
 npm run dev
@@ -56,9 +59,22 @@ npm start
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `OPENROUTER_API_KEY` | **Yes** | OpenRouter API key for AI chat (get one free at openrouter.ai) |
-| `OPENAI_API_KEY` | No | Fallback if `OPENROUTER_API_KEY` is not set |
+| `OPENAI_API_KEY` | **Yes** | OpenAI API key — used for TTS voice messages (also fallback for chat if OPENROUTER_API_KEY is missing) |
 | `MODEL_NAME` | No | Override the AI model (default: `mistralai/mistral-small-3.1-24b-instruct`) |
 | `PORT` | No | Server port (default: 3000; Railway provides this automatically) |
+
+### Voice Messages (TTS)
+
+Each companion has a unique voice powered by OpenAI's TTS API:
+
+| Companion | Voice | Character |
+|-----------|-------|----------|
+| Serena | `shimmer` | Soft, warm |
+| Alex | `nova` | Energetic, bright |
+| Luna | `alloy` | Smooth, gentle |
+| Victoria | `onyx` | Deep, commanding |
+
+Voice messages require `OPENAI_API_KEY` to be set. If not configured, the Listen button will show an error.
 
 ### Why OpenRouter?
 

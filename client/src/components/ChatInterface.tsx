@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { trpc } from '../utils/trpc';
 import { getUserId } from '../utils/anonymousUser';
 
@@ -14,6 +14,92 @@ interface ChatInterfaceProps {
   gradient: string;
 }
 
+// ─── Audio Button Component ──────────────────────────────────────────────────
+function AudioButton({ text, companionId }: { text: string; companionId: string }) {
+  const [state, setState] = useState<'idle' | 'loading' | 'playing'>('idle');
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const ttsMutation = trpc.textToSpeech.useMutation();
+
+  const handleClick = useCallback(async () => {
+    // If playing, stop
+    if (state === 'playing' && audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      setState('idle');
+      return;
+    }
+
+    // If we already have cached audio, play it
+    if (audioUrl) {
+      playAudio(audioUrl);
+      return;
+    }
+
+    // Generate TTS
+    setState('loading');
+    try {
+      const result = await ttsMutation.mutateAsync({ text, companionId });
+      const url = `data:audio/mp3;base64,${result.audio}`;
+      setAudioUrl(url);
+      playAudio(url);
+    } catch (err) {
+      setState('idle');
+    }
+  }, [state, audioUrl, text, companionId]);
+
+  const playAudio = (url: string) => {
+    const audio = new Audio(url);
+    audioRef.current = audio;
+    setState('playing');
+    audio.play();
+    audio.onended = () => setState('idle');
+    audio.onerror = () => setState('idle');
+  };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+    };
+  }, []);
+
+  return (
+    <button
+      onClick={handleClick}
+      className={`inline-flex items-center justify-center w-7 h-7 rounded-full transition-all duration-200 ${
+        state === 'idle'
+          ? 'text-velvet-gold hover:bg-velvet-gold/10'
+          : state === 'loading'
+          ? 'text-velvet-gold animate-pulse'
+          : 'text-velvet-gold bg-velvet-gold/20 animate-pulse'
+      }`}
+      title={state === 'playing' ? 'Stop' : 'Listen'}
+    >
+      {state === 'loading' ? (
+        // Spinner
+        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+        </svg>
+      ) : state === 'playing' ? (
+        // Stop icon
+        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+          <rect x="6" y="6" width="12" height="12" rx="1" />
+        </svg>
+      ) : (
+        // Speaker icon
+        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M11 5L6 9H2v6h4l5 4V5zM15.54 8.46a5 5 0 010 7.07l-1.41-1.41a3 3 0 000-4.24l1.41-1.42zM19.07 4.93a10 10 0 010 14.14l-1.41-1.41a8 8 0 000-11.32l1.41-1.41z" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
+// ─── Main Chat Interface ─────────────────────────────────────────────────────
 export default function ChatInterface({ companionId, companionName, companionAvatar, gradient }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -123,6 +209,12 @@ export default function ChatInterface({ companionId, companionName, companionAva
               }`}
             >
               <p className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+              {/* Audio button for assistant messages */}
+              {msg.role === 'assistant' && (
+                <div className="mt-2 flex justify-end">
+                  <AudioButton text={msg.content} companionId={companionId} />
+                </div>
+              )}
             </div>
           </div>
         ))}
