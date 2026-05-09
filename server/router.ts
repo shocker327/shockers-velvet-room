@@ -1,0 +1,141 @@
+import { initTRPC } from '@trpc/server';
+import { z } from 'zod';
+import OpenAI from 'openai';
+import db from './db';
+import { companions } from './companions';
+
+const t = initTRPC.create();
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+export const appRouter = t.router({
+  // Get all companions
+  getCompanions: t.procedure.query(() => {
+    return companions.map(({ systemPrompt, ...rest }) => rest);
+  }),
+
+  // Get a single companion
+  getCompanion: t.procedure
+    .input(z.object({ id: z.string() }))
+    .query(({ input }) => {
+      const companion = companions.find((c) => c.id === input.id);
+      if (!companion) throw new Error('Companion not found');
+      const { systemPrompt, ...rest } = companion;
+      return rest;
+    }),
+
+  // Get chat history
+  getChatHistory: t.procedure
+    .input(
+      z.object({
+        userId: z.string(),
+        companionId: z.string(),
+        limit: z.number().optional().default(50),
+      })
+    )
+    .query(({ input }) => {
+      const stmt = db.prepare(
+        'SELECT role, content, created_at FROM messages WHERE user_id = ? AND companion_id = ? ORDER BY created_at ASC LIMIT ?'
+      );
+      return stmt.all(input.userId, input.companionId, input.limit) as {
+        role: string;
+        content: string;
+        created_at: string;
+      }[];
+    }),
+
+  // Send a message and get AI response
+  sendMessage: t.procedure
+    .input(
+      z.object({
+        userId: z.string(),
+        companionId: z.string(),
+        message: z.string(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const companion = companions.find((c) => c.id === input.companionId);
+      if (!companion) throw new Error('Companion not found');
+
+      // Save user message
+      const insertStmt = db.prepare(
+        'INSERT INTO messages (user_id, companion_id, role, content) VALUES (?, ?, ?, ?)'
+      );
+      insertStmt.run(input.userId, input.companionId, 'user', input.message);
+
+      // Get recent history for context
+      const historyStmt = db.prepare(
+        'SELECT role, content FROM messages WHERE user_id = ? AND companion_id = ? ORDER BY created_at DESC LIMIT 20'
+      );
+      const history = (
+        historyStmt.all(input.userId, input.companionId) as {
+          role: string;
+          content: string;
+        }[]
+      ).reverse();
+
+      // Build messages array for OpenAI
+      const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+        { role: 'system', content: companion.systemPrompt },
+        ...history.map((msg) => ({
+          role: msg.role as 'user' | 'assistant',
+          content: msg.content,
+        })),
+      ];
+
+      try {
+        const completion = await openai.chat.completions.create({
+          model: 'gpt-4.1-mini',
+          messages,
+          max_tokens: 1000,
+          temperature: 0.9,
+        });
+
+        const reply = completion.choices[0]?.message?.content || 'I am lost in thought...';
+
+        // Save assistant message
+        insertStmt.run(input.userId, input.companionId, 'assistant', reply);
+
+        return { role: 'assistant' as const, content: reply };
+      } catch (error: any) {
+        const errorMsg = 'I seem to be having trouble connecting right now. Please try again in a moment.';
+        return { role: 'assistant' as const, content: errorMsg };
+      }
+    }),
+
+  // Clear chat history
+  clearChat: t.procedure
+    .input(
+      z.object({
+        userId: z.string(),
+        companionId: z.string(),
+      })
+    )
+    .mutation(({ input }) => {
+      const stmt = db.prepare(
+        'DELETE FROM messages WHERE user_id = ? AND companion_id = ?'
+      );
+      stmt.run(input.userId, input.companionId);
+      return { success: true };
+    }),
+
+  // Join waitlist
+  joinWaitlist: t.procedure
+    .input(z.object({ email: z.string().email() }))
+    .mutation(({ input }) => {
+      try {
+        const stmt = db.prepare('INSERT INTO waitlist (email) VALUES (?)');
+        stmt.run(input.email);
+        return { success: true, message: 'You have been added to the waitlist!' };
+      } catch (error: any) {
+        if (error.message?.includes('UNIQUE')) {
+          return { success: true, message: 'You are already on the waitlist!' };
+        }
+        throw error;
+      }
+    }),
+});
+
+export type AppRouter = typeof appRouter;

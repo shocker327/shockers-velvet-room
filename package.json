@@ -1,0 +1,33 @@
+{
+  "name": "velvet-suite",
+  "version": "1.0.0",
+  "description": "The Velvet Suite — AI Companion Chat App",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "tsx watch server/index.ts",
+    "dev:client": "cd client && vite",
+    "build": "cd client && npx vite build && cd .. && npx tsc -p tsconfig.server.json",
+    "start": "node dist/server/index.js",
+    "postinstall": "cd client && npm install"
+  },
+  "dependencies": {
+    "@trpc/server": "^10.45.0",
+    "better-sqlite3": "^11.0.0",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "openai": "^4.52.0",
+    "uuid": "^9.0.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.8",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.11.0",
+    "@types/uuid": "^9.0.7",
+    "concurrently": "^8.2.2",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}
