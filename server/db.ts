@@ -54,8 +54,20 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_messages_user_companion 
     ON messages(user_id, companion_id);
 
+  CREATE TABLE IF NOT EXISTS generated_images (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    companion_id TEXT NOT NULL,
+    image_url TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE INDEX IF NOT EXISTS idx_memories_user_companion
     ON memories(user_id, companion_id);
+
+  CREATE INDEX IF NOT EXISTS idx_generated_images_user_companion
+    ON generated_images(user_id, companion_id);
 `);
 
 export default db;

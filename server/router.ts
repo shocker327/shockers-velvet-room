@@ -18,8 +18,8 @@ const chatClient = new OpenAI({
 
 const MODEL = process.env.MODEL_NAME || 'mistralai/mistral-small-3.1-24b-instruct';
 
-// ─── TTS client (OpenAI directly) ────────────────────────────────────────────
-const ttsClient = new OpenAI({
+// ─── OpenAI client (TTS + Image Generation) ─────────────────────────────────
+const openaiClient = new OpenAI({
   baseURL: 'https://api.openai.com/v1',
   apiKey: process.env.OPENAI_API_KEY,
 });
@@ -71,7 +71,6 @@ function getMemoriesForPrompt(userId: string, companionId: string): string {
 }
 
 function incrementMessageCount(userId: string, companionId: string): { message_count: number; level: number } {
-  // Upsert relationship progress
   const existing = db.prepare(
     'SELECT message_count FROM relationship_progress WHERE user_id = ? AND companion_id = ?'
   ).get(userId, companionId) as { message_count: number } | undefined;
@@ -110,7 +109,6 @@ User message: "${userMessage.replace(/"/g, '\\"')}"`;
 
     const content = completion.choices[0]?.message?.content?.trim() || '{}';
 
-    // Try to parse JSON from the response (handle markdown code blocks)
     let jsonStr = content;
     const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
     if (codeBlockMatch) {
@@ -133,13 +131,11 @@ User message: "${userMessage.replace(/"/g, '\\"')}"`;
     for (const [key, value] of Object.entries(facts)) {
       if (typeof value !== 'string' || !value.trim()) continue;
 
-      // Check if we already have this exact memory
       const existing = db.prepare(
         'SELECT id FROM memories WHERE user_id = ? AND companion_id = ? AND memory_key = ? AND memory_value = ?'
       ).get(userId, companionId, key, value);
       if (existing) continue;
 
-      // Update existing key or insert new
       const existingKey = db.prepare(
         'SELECT id FROM memories WHERE user_id = ? AND companion_id = ? AND memory_key = ?'
       ).get(userId, companionId, key) as { id: number } | undefined;
@@ -148,7 +144,6 @@ User message: "${userMessage.replace(/"/g, '\\"')}"`;
         db.prepare('UPDATE memories SET memory_value = ?, created_at = CURRENT_TIMESTAMP WHERE id = ?')
           .run(value, existingKey.id);
       } else {
-        // Enforce 50 memory limit
         const { cnt } = countStmt.get(userId, companionId) as { cnt: number };
         if (cnt >= 50) {
           deleteOldest.run(userId, companionId);
@@ -157,8 +152,85 @@ User message: "${userMessage.replace(/"/g, '\\"')}"`;
       }
     }
   } catch (error) {
-    // Memory extraction is best-effort — never block the chat
     console.error('Memory extraction failed:', error);
+  }
+}
+
+// ─── Image Trigger Detection ─────────────────────────────────────────────────
+async function detectImageTrigger(
+  userMessage: string,
+  assistantReply: string,
+  companionName: string
+): Promise<string | null> {
+  try {
+    const prompt = `You are analyzing a chat between a user and an AI companion named ${companionName}. Based on the conversation below, should ${companionName} send a photo/selfie of herself?
+
+Answer YES if:
+- The user asked for a photo, selfie, or picture
+- The user asked what she looks like
+- The companion's response naturally references sending a photo or showing herself
+- The companion describes her appearance in a "showing off" context
+
+Answer NO if:
+- It's just normal conversation
+- No visual context is relevant
+
+If YES: Describe what the photo should show in one sentence (pose, setting, clothing, mood). Keep it tasteful — suggestive is fine but no explicit nudity.
+If NO: Respond with exactly: NO_IMAGE
+
+User: "${userMessage.replace(/"/g, '\\"')}"
+${companionName}: "${assistantReply.replace(/"/g, '\\"').substring(0, 500)}"`;
+
+    const completion = await chatClient.chat.completions.create({
+      model: MODEL,
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 150,
+      temperature: 0.3,
+    });
+
+    const result = completion.choices[0]?.message?.content?.trim() || 'NO_IMAGE';
+    if (result.toUpperCase().includes('NO_IMAGE') || result.toUpperCase().startsWith('NO')) {
+      return null;
+    }
+    return result;
+  } catch (error) {
+    console.error('Image trigger detection failed:', error);
+    return null;
+  }
+}
+
+// ─── Image Generation ────────────────────────────────────────────────────────
+async function generateCompanionImage(
+  userId: string,
+  companionId: string,
+  visualDescription: string,
+  sceneDescription: string
+): Promise<string | null> {
+  if (!process.env.OPENAI_API_KEY) return null;
+
+  try {
+    const fullPrompt = `Portrait photograph of ${visualDescription}. Scene: ${sceneDescription}. High quality, photorealistic, professional photography, beautiful lighting. The image should be tasteful and artistic.`;
+
+    const response = await openaiClient.images.generate({
+      model: 'dall-e-3',
+      prompt: fullPrompt,
+      n: 1,
+      size: '1024x1024',
+      quality: 'standard',
+    });
+
+    const imageUrl = response.data?.[0]?.url;
+    if (!imageUrl) return null;
+
+    // Store in database
+    db.prepare(
+      'INSERT INTO generated_images (user_id, companion_id, image_url, prompt) VALUES (?, ?, ?, ?)'
+    ).run(userId, companionId, imageUrl, fullPrompt);
+
+    return imageUrl;
+  } catch (error: any) {
+    console.error('Image generation failed:', error?.message || error);
+    return null;
   }
 }
 
@@ -166,7 +238,7 @@ User message: "${userMessage.replace(/"/g, '\\"')}"`;
 export const appRouter = t.router({
   // Get all companions
   getCompanions: t.procedure.query(() => {
-    return companions.map(({ systemPrompt, ...rest }) => rest);
+    return companions.map(({ systemPrompt, visualDescription, ...rest }) => rest);
   }),
 
   // Get a single companion
@@ -175,7 +247,7 @@ export const appRouter = t.router({
     .query(({ input }) => {
       const companion = companions.find((c) => c.id === input.id);
       if (!companion) throw new Error('Companion not found');
-      const { systemPrompt, ...rest } = companion;
+      const { systemPrompt, visualDescription, ...rest } = companion;
       return rest;
     }),
 
@@ -218,7 +290,7 @@ export const appRouter = t.router({
       }[];
     }),
 
-  // Send a message and get AI response
+  // Send a message and get AI response (with optional image)
   sendMessage: t.procedure
     .input(
       z.object({
@@ -243,7 +315,7 @@ export const appRouter = t.router({
       // Get memories for context injection
       const memoryContext = getMemoriesForPrompt(input.userId, input.companionId);
 
-      // Build enhanced system prompt with relationship level and memories
+      // Build enhanced system prompt
       const relationshipPrompt = getRelationshipPrompt(level);
       const enhancedSystemPrompt = `${relationshipPrompt}\n\n${companion.systemPrompt}${memoryContext}`;
 
@@ -258,7 +330,7 @@ export const appRouter = t.router({
         }[]
       ).reverse();
 
-      // Build messages array for OpenRouter
+      // Build messages array
       const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
         { role: 'system', content: enhancedSystemPrompt },
         ...history
@@ -285,11 +357,62 @@ export const appRouter = t.router({
         // Extract memories in the background (non-blocking)
         extractMemories(input.userId, input.companionId, input.message).catch(() => {});
 
-        return { role: 'assistant' as const, content: reply };
+        // Detect if an image should be sent (non-blocking, but we await it to include in response)
+        let image: string | null = null;
+        if (process.env.OPENAI_API_KEY) {
+          try {
+            const sceneDescription = await detectImageTrigger(input.message, reply, companion.name);
+            if (sceneDescription) {
+              image = await generateCompanionImage(
+                input.userId,
+                input.companionId,
+                companion.visualDescription,
+                sceneDescription
+              );
+            }
+          } catch (err) {
+            // Image generation is best-effort
+            console.error('Image pipeline error:', err);
+          }
+        }
+
+        return { role: 'assistant' as const, content: reply, image };
       } catch (error: any) {
         const errorMsg = 'I seem to be having trouble connecting right now. Please try again in a moment.';
-        return { role: 'assistant' as const, content: errorMsg };
+        return { role: 'assistant' as const, content: errorMsg, image: null };
       }
+    }),
+
+  // Generate image on demand (e.g., "Send me a photo" button)
+  generateImage: t.procedure
+    .input(
+      z.object({
+        userId: z.string(),
+        companionId: z.string(),
+        description: z.string().optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const companion = companions.find((c) => c.id === input.companionId);
+      if (!companion) throw new Error('Companion not found');
+
+      if (!process.env.OPENAI_API_KEY) {
+        throw new Error('Image generation is not configured — OPENAI_API_KEY is required.');
+      }
+
+      const scene = input.description || 'taking a casual selfie with a warm smile, relaxed and inviting';
+      const imageUrl = await generateCompanionImage(
+        input.userId,
+        input.companionId,
+        companion.visualDescription,
+        scene
+      );
+
+      if (!imageUrl) {
+        throw new Error('Failed to generate image. Please try again.');
+      }
+
+      return { imageUrl };
     }),
 
   // Text-to-Speech
@@ -309,7 +432,7 @@ export const appRouter = t.router({
       }
 
       try {
-        const response = await ttsClient.audio.speech.create({
+        const response = await openaiClient.audio.speech.create({
           model: 'tts-1',
           voice: companion.voice,
           input: input.text,

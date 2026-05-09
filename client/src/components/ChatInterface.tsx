@@ -5,6 +5,7 @@ import { getUserId } from '../utils/anonymousUser';
 interface Message {
   role: string;
   content: string;
+  image?: string | null;
 }
 
 interface ChatInterfaceProps {
@@ -12,6 +13,65 @@ interface ChatInterfaceProps {
   companionName: string;
   companionAvatar: string;
   gradient: string;
+}
+
+// ─── Image Lightbox ──────────────────────────────────────────────────────────
+function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <button
+        className="absolute top-4 right-4 text-white/70 hover:text-white text-3xl font-light"
+        onClick={onClose}
+      >
+        &times;
+      </button>
+      <img
+        src={src}
+        alt="Companion photo"
+        className="max-w-[90vw] max-h-[90vh] rounded-lg shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      />
+    </div>
+  );
+}
+
+// ─── Companion Photo ─────────────────────────────────────────────────────────
+function CompanionPhoto({ src }: { src: string }) {
+  const [showLightbox, setShowLightbox] = useState(false);
+
+  return (
+    <>
+      <div
+        className="mt-2 cursor-pointer group"
+        onClick={() => setShowLightbox(true)}
+      >
+        <div className="relative inline-block rounded-xl overflow-hidden border-2 border-velvet-gold/30 shadow-lg hover:border-velvet-gold/60 transition-all duration-300">
+          <img
+            src={src}
+            alt="Companion selfie"
+            className="max-w-[280px] max-h-[280px] object-cover"
+            loading="lazy"
+          />
+          {/* Polaroid-style label */}
+          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
+            <span className="text-xs text-white/80 font-heading">tap to view</span>
+          </div>
+        </div>
+      </div>
+      {showLightbox && <Lightbox src={src} onClose={() => setShowLightbox(false)} />}
+    </>
+  );
 }
 
 // ─── Relationship Indicator ──────────────────────────────────────────────────
@@ -26,15 +86,14 @@ function RelationshipIndicator({ userId, companionId }: { userId: string; compan
     : 100;
 
   const heartColors = [
-    'text-gray-400',     // level 1
-    'text-pink-400',     // level 2
-    'text-rose-500',     // level 3
-    'text-red-500',      // level 4
+    'text-gray-400',
+    'text-pink-400',
+    'text-rose-500',
+    'text-red-500',
   ];
 
   return (
     <div className="flex items-center gap-2 px-3 py-1.5 bg-velvet-dark/50 rounded-lg border border-purple-800/20">
-      {/* Hearts based on level */}
       <div className="flex items-center gap-0.5">
         {[1, 2, 3, 4].map((l) => (
           <span
@@ -43,13 +102,11 @@ function RelationshipIndicator({ userId, companionId }: { userId: string; compan
               l <= level ? heartColors[level - 1] : 'text-gray-700'
             } ${l === level ? 'animate-pulse' : ''}`}
           >
-            ♥
+            &#9829;
           </span>
         ))}
       </div>
-      {/* Label */}
       <span className="text-xs text-gray-400">{label}</span>
-      {/* Progress bar to next level */}
       {nextLevelAt && (
         <div className="w-12 h-1 bg-gray-800 rounded-full overflow-hidden">
           <div
@@ -145,6 +202,7 @@ export default function ChatInterface({ companionId, companionName, companionAva
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isGeneratingPhoto, setIsGeneratingPhoto] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const userId = getUserId();
 
@@ -156,6 +214,7 @@ export default function ChatInterface({ companionId, companionName, companionAva
 
   const sendMutation = trpc.sendMessage.useMutation();
   const clearMutation = trpc.clearChat.useMutation();
+  const generateImageMutation = trpc.generateImage.useMutation();
   const utils = trpc.useUtils();
 
   useEffect(() => {
@@ -182,8 +241,10 @@ export default function ChatInterface({ companionId, companionName, companionAva
         companionId,
         message: userMessage,
       });
-      setMessages((prev) => [...prev, { role: response.role, content: response.content }]);
-      // Refresh relationship status after each message
+      setMessages((prev) => [
+        ...prev,
+        { role: response.role, content: response.content, image: response.image },
+      ]);
       utils.getRelationshipStatus.invalidate({ userId, companionId });
     } catch (error) {
       setMessages((prev) => [
@@ -192,6 +253,33 @@ export default function ChatInterface({ companionId, companionName, companionAva
       ]);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleRequestPhoto = async () => {
+    if (isGeneratingPhoto || isLoading) return;
+    setIsGeneratingPhoto(true);
+
+    try {
+      const result = await generateImageMutation.mutateAsync({
+        userId,
+        companionId,
+      });
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: `Here's a photo just for you... 💋`,
+          image: result.imageUrl,
+        },
+      ]);
+    } catch (error) {
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: 'I tried to send you a photo but something went wrong. Try asking me again!' },
+      ]);
+    } finally {
+      setIsGeneratingPhoto(false);
     }
   };
 
@@ -217,7 +305,7 @@ export default function ChatInterface({ companionId, companionName, companionAva
           </div>
           <div>
             <h2 className="font-heading text-lg font-bold text-velvet-gold">{companionName}</h2>
-            <span className="text-xs text-green-400">● Online</span>
+            <span className="text-xs text-green-400">&#9679; Online</span>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -255,6 +343,9 @@ export default function ChatInterface({ companionId, companionName, companionAva
               }`}
             >
               <p className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+              {/* Companion photo */}
+              {msg.image && <CompanionPhoto src={msg.image} />}
+              {/* Audio + actions for assistant messages */}
               {msg.role === 'assistant' && (
                 <div className="mt-2 flex justify-end">
                   <AudioButton text={msg.content} companionId={companionId} />
@@ -274,12 +365,37 @@ export default function ChatInterface({ companionId, companionName, companionAva
             </div>
           </div>
         )}
+        {isGeneratingPhoto && (
+          <div className="flex justify-start">
+            <div className="bg-velvet-mid border border-purple-800/30 rounded-2xl px-4 py-3">
+              <div className="flex items-center gap-2 text-sm text-gray-400">
+                <svg className="w-4 h-4 animate-spin text-velvet-gold" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Taking a photo for you...
+              </div>
+            </div>
+          </div>
+        )}
         <div ref={messagesEndRef} />
       </div>
 
       {/* Input */}
       <div className="p-4 border-t border-purple-800/30">
         <div className="flex gap-3">
+          {/* Camera button */}
+          <button
+            onClick={handleRequestPhoto}
+            disabled={isGeneratingPhoto || isLoading}
+            className="flex items-center justify-center w-12 h-12 rounded-xl bg-velvet-mid border border-purple-800/30 text-velvet-gold hover:bg-velvet-gold/10 hover:border-velvet-gold/30 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Request a photo"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z" />
+            </svg>
+          </button>
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
