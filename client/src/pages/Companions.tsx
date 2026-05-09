@@ -1,8 +1,11 @@
 import { trpc } from '../utils/trpc';
+import { getUserId } from '../utils/anonymousUser';
 import CompanionCard from '../components/CompanionCard';
 
 export default function Companions() {
+  const userId = getUserId();
   const { data: companions, isLoading } = trpc.getCompanions.useQuery();
+  const { data: unreadMap } = trpc.getUnreadPerCompanion.useQuery({ userId });
 
   return (
     <div className="min-h-screen pt-24 pb-16 px-4">
@@ -21,7 +24,11 @@ export default function Companions() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             {companions?.map((companion) => (
-              <CompanionCard key={companion.id} {...companion} />
+              <CompanionCard
+                key={companion.id}
+                {...companion}
+                unreadMessage={unreadMap?.[companion.id] || null}
+              />
             ))}
           </div>
         )}

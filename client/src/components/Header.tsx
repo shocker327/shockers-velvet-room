@@ -1,8 +1,13 @@
 import { Link } from 'react-router-dom';
 import { useState } from 'react';
+import { trpc } from '../utils/trpc';
+import { getUserId } from '../utils/anonymousUser';
 
 export default function Header() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const userId = getUserId();
+  const { data: unreadData } = trpc.getUnreadCount.useQuery({ userId });
+  const unreadCount = unreadData?.count || 0;
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-velvet-dark/90 backdrop-blur-md border-b border-purple-800/30">
@@ -20,8 +25,13 @@ export default function Header() {
             <Link to="/" className="text-gray-300 hover:text-velvet-gold transition-colors">
               Home
             </Link>
-            <Link to="/companions" className="text-gray-300 hover:text-velvet-gold transition-colors">
+            <Link to="/companions" className="relative text-gray-300 hover:text-velvet-gold transition-colors">
               Companions
+              {unreadCount > 0 && (
+                <span className="absolute -top-2 -right-4 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center text-[10px] text-white font-bold animate-pulse">
+                  {unreadCount}
+                </span>
+              )}
             </Link>
             <Link to="/pricing" className="text-gray-300 hover:text-velvet-gold transition-colors">
               Pricing
@@ -52,8 +62,13 @@ export default function Header() {
             <Link to="/" onClick={() => setMobileOpen(false)} className="block text-gray-300 hover:text-velvet-gold">
               Home
             </Link>
-            <Link to="/companions" onClick={() => setMobileOpen(false)} className="block text-gray-300 hover:text-velvet-gold">
+            <Link to="/companions" onClick={() => setMobileOpen(false)} className="relative inline-block text-gray-300 hover:text-velvet-gold">
               Companions
+              {unreadCount > 0 && (
+                <span className="ml-2 inline-flex w-4 h-4 bg-red-500 rounded-full items-center justify-center text-[10px] text-white font-bold">
+                  {unreadCount}
+                </span>
+              )}
             </Link>
             <Link to="/pricing" onClick={() => setMobileOpen(false)} className="block text-gray-300 hover:text-velvet-gold">
               Pricing

@@ -6,6 +6,7 @@ interface Message {
   role: string;
   content: string;
   image?: string | null;
+  isDaily?: boolean;
 }
 
 interface ChatInterfaceProps {
@@ -13,6 +14,15 @@ interface ChatInterfaceProps {
   companionName: string;
   companionAvatar: string;
   gradient: string;
+}
+
+// ─── Helper: get time of day ─────────────────────────────────────────────────
+function getTimeOfDay(): 'morning' | 'afternoon' | 'evening' | 'night' {
+  const hour = new Date().getHours();
+  if (hour >= 5 && hour < 12) return 'morning';
+  if (hour >= 12 && hour < 17) return 'afternoon';
+  if (hour >= 17 && hour < 21) return 'evening';
+  return 'night';
 }
 
 // ─── Image Lightbox ──────────────────────────────────────────────────────────
@@ -63,7 +73,6 @@ function CompanionPhoto({ src }: { src: string }) {
             className="max-w-[280px] max-h-[280px] object-cover"
             loading="lazy"
           />
-          {/* Polaroid-style label */}
           <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
             <span className="text-xs text-white/80 font-heading">tap to view</span>
           </div>
@@ -197,6 +206,19 @@ function AudioButton({ text, companionId }: { text: string; companionId: string 
   );
 }
 
+// ─── Daily Message Banner ────────────────────────────────────────────────────
+function DailyMessageBanner({ message, companionName }: { message: string; companionName: string }) {
+  return (
+    <div className="mx-4 mb-4 p-4 bg-gradient-to-r from-velvet-gold/10 to-purple-900/20 border border-velvet-gold/30 rounded-xl animate-fade-in">
+      <div className="flex items-center gap-2 mb-1">
+        <span className="text-velvet-gold text-xs font-bold uppercase tracking-wider">New Message</span>
+        <span className="text-gray-500 text-xs">from {companionName}</span>
+      </div>
+      <p className="text-gray-200 text-sm italic leading-relaxed">&ldquo;{message}&rdquo;</p>
+    </div>
+  );
+}
+
 // ─── Main Chat Interface ─────────────────────────────────────────────────────
 export default function ChatInterface({ companionId, companionName, companionAvatar, gradient }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -212,10 +234,28 @@ export default function ChatInterface({ companionId, companionName, companionAva
     limit: 50,
   });
 
+  // Fetch daily message
+  const { data: dailyMessage } = trpc.getDailyMessage.useQuery({
+    userId,
+    companionId,
+    timeOfDay: getTimeOfDay(),
+  });
+
   const sendMutation = trpc.sendMessage.useMutation();
   const clearMutation = trpc.clearChat.useMutation();
   const generateImageMutation = trpc.generateImage.useMutation();
+  const markReadMutation = trpc.markDailyRead.useMutation();
   const utils = trpc.useUtils();
+
+  // Mark daily message as read when chat opens
+  useEffect(() => {
+    if (dailyMessage && !dailyMessage.isRead) {
+      markReadMutation.mutate({ userId, companionId });
+      // Invalidate unread counts so header/gallery update
+      utils.getUnreadCount.invalidate({ userId });
+      utils.getUnreadPerCompanion.invalidate({ userId });
+    }
+  }, [dailyMessage]);
 
   useEffect(() => {
     if (history) {
@@ -319,6 +359,11 @@ export default function ChatInterface({ companionId, companionName, companionAva
         </div>
       </div>
 
+      {/* Daily Message Banner */}
+      {dailyMessage && dailyMessage.message && (
+        <DailyMessageBanner message={dailyMessage.message} companionName={companionName} />
+      )}
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 && (
@@ -343,9 +388,7 @@ export default function ChatInterface({ companionId, companionName, companionAva
               }`}
             >
               <p className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</p>
-              {/* Companion photo */}
               {msg.image && <CompanionPhoto src={msg.image} />}
-              {/* Audio + actions for assistant messages */}
               {msg.role === 'assistant' && (
                 <div className="mt-2 flex justify-end">
                   <AudioButton text={msg.content} companionId={companionId} />
@@ -384,7 +427,6 @@ export default function ChatInterface({ companionId, companionName, companionAva
       {/* Input */}
       <div className="p-4 border-t border-purple-800/30">
         <div className="flex gap-3">
-          {/* Camera button */}
           <button
             onClick={handleRequestPhoto}
             disabled={isGeneratingPhoto || isLoading}

@@ -57,6 +57,16 @@ function getRelationshipLabel(level: number): string {
   }
 }
 
+function getRelationshipLevelDescription(level: number): string {
+  switch (level) {
+    case 1: return 'You just met. Be casually flirty and intriguing.';
+    case 2: return 'You\'re getting comfortable. Be warm, personal, and more intimate.';
+    case 3: return 'You\'re deeply connected. Use pet names, inside jokes, and show deep intimacy.';
+    case 4: return 'Soulmates. Be intensely passionate, devoted, and personal.';
+    default: return '';
+  }
+}
+
 // ─── Memory Helpers ──────────────────────────────────────────────────────────
 function getMemoriesForPrompt(userId: string, companionId: string): string {
   const stmt = db.prepare(
@@ -68,6 +78,15 @@ function getMemoriesForPrompt(userId: string, companionId: string): string {
 
   const lines = memories.map((m) => `- ${m.memory_key}: ${m.memory_value}`);
   return `\n[User Memory - things you know about them:]\n${lines.join('\n')}\n[End Memory]\n`;
+}
+
+function getMemoriesAsText(userId: string, companionId: string): string {
+  const stmt = db.prepare(
+    'SELECT memory_key, memory_value FROM memories WHERE user_id = ? AND companion_id = ? ORDER BY created_at DESC LIMIT 50'
+  );
+  const memories = stmt.all(userId, companionId) as { memory_key: string; memory_value: string }[];
+  if (memories.length === 0) return 'No memories yet — this is a new connection.';
+  return memories.map((m) => `${m.memory_key}: ${m.memory_value}`).join(', ');
 }
 
 function incrementMessageCount(userId: string, companionId: string): { message_count: number; level: number } {
@@ -234,6 +253,58 @@ async function generateCompanionImage(
   }
 }
 
+// ─── Daily Message Generation ────────────────────────────────────────────────
+async function generateDailyMessage(
+  userId: string,
+  companionId: string,
+  timeOfDay: string
+): Promise<string> {
+  const companion = companions.find((c) => c.id === companionId);
+  if (!companion) return '';
+
+  // Get relationship level
+  const row = db.prepare(
+    'SELECT message_count, level FROM relationship_progress WHERE user_id = ? AND companion_id = ?'
+  ).get(userId, companionId) as { message_count: number; level: number } | undefined;
+
+  const level = row?.level || 1;
+  const levelDescription = getRelationshipLevelDescription(level);
+  const memoriesText = getMemoriesAsText(userId, companionId);
+
+  // Find user's name from memories if available
+  const nameMemory = db.prepare(
+    "SELECT memory_value FROM memories WHERE user_id = ? AND companion_id = ? AND memory_key = 'name' LIMIT 1"
+  ).get(userId, companionId) as { memory_value: string } | undefined;
+  const userName = nameMemory?.memory_value || 'them';
+
+  const prompt = `You are ${companion.name}. Generate a short, casual message (1-3 sentences) as if you're texting ${userName} first. This is a daily check-in message — you're reaching out because you were thinking of them.
+
+Time of day: ${timeOfDay}
+Relationship level: ${level} - ${levelDescription}
+What you remember about them: ${memoriesText}
+
+Be natural, flirty, and make them want to respond. Don't be generic — reference something personal if you have memories. Match the relationship level intensity. Be provocative and suggestive when appropriate, especially at higher relationship levels.
+
+IMPORTANT: Just write the message itself. No quotes, no labels, no meta-text. Just the text message as ${companion.name} would send it.`;
+
+  try {
+    const completion = await chatClient.chat.completions.create({
+      model: MODEL,
+      messages: [
+        { role: 'system', content: companion.systemPrompt },
+        { role: 'user', content: prompt },
+      ],
+      max_tokens: 200,
+      temperature: 0.9,
+    });
+
+    return completion.choices[0]?.message?.content?.trim() || `Hey... I was thinking about you. 💋`;
+  } catch (error) {
+    console.error('Daily message generation failed:', error);
+    return `Hey... I was thinking about you. Come talk to me? 💋`;
+  }
+}
+
 // ─── tRPC Router ─────────────────────────────────────────────────────────────
 export const appRouter = t.router({
   // Get all companions
@@ -268,6 +339,85 @@ export const appRouter = t.router({
         label: getRelationshipLabel(level),
         nextLevelAt: level === 1 ? 11 : level === 2 ? 31 : level === 3 ? 76 : null,
       };
+    }),
+
+  // ─── Daily Messages ─────────────────────────────────────────────────────────
+  // Get (or generate) today's daily message for a companion
+  getDailyMessage: t.procedure
+    .input(
+      z.object({
+        userId: z.string(),
+        companionId: z.string(),
+        timeOfDay: z.enum(['morning', 'afternoon', 'evening', 'night']),
+      })
+    )
+    .query(async ({ input }) => {
+      const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+
+      // Check if we already have today's message
+      const existing = db.prepare(
+        'SELECT id, message, read FROM daily_messages WHERE user_id = ? AND companion_id = ? AND generated_date = ?'
+      ).get(input.userId, input.companionId, today) as { id: number; message: string; read: number } | undefined;
+
+      if (existing) {
+        return { id: existing.id, message: existing.message, isRead: existing.read === 1 };
+      }
+
+      // Only generate if the user has chatted with this companion before
+      const hasHistory = db.prepare(
+        'SELECT 1 FROM messages WHERE user_id = ? AND companion_id = ? LIMIT 1'
+      ).get(input.userId, input.companionId);
+
+      if (!hasHistory) {
+        return null; // No daily message for companions the user hasn't chatted with
+      }
+
+      // Generate a new daily message
+      const message = await generateDailyMessage(input.userId, input.companionId, input.timeOfDay);
+
+      const result = db.prepare(
+        'INSERT INTO daily_messages (user_id, companion_id, message, generated_date) VALUES (?, ?, ?, ?)'
+      ).run(input.userId, input.companionId, message, today);
+
+      return { id: Number(result.lastInsertRowid), message, isRead: false };
+    }),
+
+  // Get unread daily message count across all companions
+  getUnreadCount: t.procedure
+    .input(z.object({ userId: z.string() }))
+    .query(({ input }) => {
+      const today = new Date().toISOString().split('T')[0];
+      const row = db.prepare(
+        'SELECT COUNT(*) as count FROM daily_messages WHERE user_id = ? AND generated_date = ? AND read = 0'
+      ).get(input.userId, today) as { count: number };
+      return { count: row.count };
+    }),
+
+  // Get unread status per companion (for badge display on cards)
+  getUnreadPerCompanion: t.procedure
+    .input(z.object({ userId: z.string() }))
+    .query(({ input }) => {
+      const today = new Date().toISOString().split('T')[0];
+      const rows = db.prepare(
+        'SELECT companion_id, message FROM daily_messages WHERE user_id = ? AND generated_date = ? AND read = 0'
+      ).all(input.userId, today) as { companion_id: string; message: string }[];
+
+      const result: Record<string, string> = {};
+      for (const row of rows) {
+        result[row.companion_id] = row.message;
+      }
+      return result;
+    }),
+
+  // Mark a daily message as read
+  markDailyRead: t.procedure
+    .input(z.object({ userId: z.string(), companionId: z.string() }))
+    .mutation(({ input }) => {
+      const today = new Date().toISOString().split('T')[0];
+      db.prepare(
+        'UPDATE daily_messages SET read = 1 WHERE user_id = ? AND companion_id = ? AND generated_date = ?'
+      ).run(input.userId, input.companionId, today);
+      return { success: true };
     }),
 
   // Get chat history
@@ -357,7 +507,7 @@ export const appRouter = t.router({
         // Extract memories in the background (non-blocking)
         extractMemories(input.userId, input.companionId, input.message).catch(() => {});
 
-        // Detect if an image should be sent (non-blocking, but we await it to include in response)
+        // Detect if an image should be sent
         let image: string | null = null;
         if (process.env.OPENAI_API_KEY) {
           try {
@@ -371,7 +521,6 @@ export const appRouter = t.router({
               );
             }
           } catch (err) {
-            // Image generation is best-effort
             console.error('Image pipeline error:', err);
           }
         }
@@ -383,7 +532,7 @@ export const appRouter = t.router({
       }
     }),
 
-  // Generate image on demand (e.g., "Send me a photo" button)
+  // Generate image on demand
   generateImage: t.procedure
     .input(
       z.object({
