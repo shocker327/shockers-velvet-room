@@ -87,13 +87,19 @@ export const appRouter = t.router({
         }[]
       ).reverse();
 
-      // Build messages array for OpenRouter
+      // Build messages array for OpenRouter.
+      // The system prompt is always the FIRST message with role "system".
+      // Conversation history follows as alternating user/assistant turns.
+      // The system message is never injected into the user turn — keeping
+      // them separate prevents the model from echoing the instructions back.
       const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
         { role: 'system', content: companion.systemPrompt },
-        ...history.map((msg) => ({
-          role: msg.role as 'user' | 'assistant',
-          content: msg.content,
-        })),
+        ...history
+          .filter((msg) => msg.role === 'user' || msg.role === 'assistant')
+          .map((msg) => ({
+            role: msg.role as 'user' | 'assistant',
+            content: msg.content,
+          })),
       ];
 
       try {
