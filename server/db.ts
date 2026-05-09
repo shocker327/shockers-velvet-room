@@ -32,8 +32,30 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS memories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    companion_id TEXT NOT NULL,
+    memory_key TEXT NOT NULL,
+    memory_value TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS relationship_progress (
+    user_id TEXT NOT NULL,
+    companion_id TEXT NOT NULL,
+    message_count INTEGER DEFAULT 0,
+    level INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, companion_id)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_messages_user_companion 
     ON messages(user_id, companion_id);
+
+  CREATE INDEX IF NOT EXISTS idx_memories_user_companion
+    ON memories(user_id, companion_id);
 `);
 
 export default db;

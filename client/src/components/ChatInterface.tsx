@@ -14,6 +14,54 @@ interface ChatInterfaceProps {
   gradient: string;
 }
 
+// ─── Relationship Indicator ──────────────────────────────────────────────────
+function RelationshipIndicator({ userId, companionId }: { userId: string; companionId: string }) {
+  const { data } = trpc.getRelationshipStatus.useQuery({ userId, companionId });
+
+  if (!data) return null;
+
+  const { level, label, messageCount, nextLevelAt } = data;
+  const progress = nextLevelAt
+    ? Math.min(100, (messageCount / nextLevelAt) * 100)
+    : 100;
+
+  const heartColors = [
+    'text-gray-400',     // level 1
+    'text-pink-400',     // level 2
+    'text-rose-500',     // level 3
+    'text-red-500',      // level 4
+  ];
+
+  return (
+    <div className="flex items-center gap-2 px-3 py-1.5 bg-velvet-dark/50 rounded-lg border border-purple-800/20">
+      {/* Hearts based on level */}
+      <div className="flex items-center gap-0.5">
+        {[1, 2, 3, 4].map((l) => (
+          <span
+            key={l}
+            className={`text-xs transition-all duration-500 ${
+              l <= level ? heartColors[level - 1] : 'text-gray-700'
+            } ${l === level ? 'animate-pulse' : ''}`}
+          >
+            ♥
+          </span>
+        ))}
+      </div>
+      {/* Label */}
+      <span className="text-xs text-gray-400">{label}</span>
+      {/* Progress bar to next level */}
+      {nextLevelAt && (
+        <div className="w-12 h-1 bg-gray-800 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-gradient-to-r from-purple-600 to-velvet-gold rounded-full transition-all duration-700"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Audio Button Component ──────────────────────────────────────────────────
 function AudioButton({ text, companionId }: { text: string; companionId: string }) {
   const [state, setState] = useState<'idle' | 'loading' | 'playing'>('idle');
@@ -22,7 +70,6 @@ function AudioButton({ text, companionId }: { text: string; companionId: string 
   const ttsMutation = trpc.textToSpeech.useMutation();
 
   const handleClick = useCallback(async () => {
-    // If playing, stop
     if (state === 'playing' && audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
@@ -30,13 +77,11 @@ function AudioButton({ text, companionId }: { text: string; companionId: string 
       return;
     }
 
-    // If we already have cached audio, play it
     if (audioUrl) {
       playAudio(audioUrl);
       return;
     }
 
-    // Generate TTS
     setState('loading');
     try {
       const result = await ttsMutation.mutateAsync({ text, companionId });
@@ -57,7 +102,6 @@ function AudioButton({ text, companionId }: { text: string; companionId: string 
     audio.onerror = () => setState('idle');
   };
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (audioRef.current) {
@@ -79,18 +123,15 @@ function AudioButton({ text, companionId }: { text: string; companionId: string 
       title={state === 'playing' ? 'Stop' : 'Listen'}
     >
       {state === 'loading' ? (
-        // Spinner
         <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
         </svg>
       ) : state === 'playing' ? (
-        // Stop icon
         <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
           <rect x="6" y="6" width="12" height="12" rx="1" />
         </svg>
       ) : (
-        // Speaker icon
         <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
           <path d="M11 5L6 9H2v6h4l5 4V5zM15.54 8.46a5 5 0 010 7.07l-1.41-1.41a3 3 0 000-4.24l1.41-1.42zM19.07 4.93a10 10 0 010 14.14l-1.41-1.41a8 8 0 000-11.32l1.41-1.41z" />
         </svg>
@@ -107,7 +148,6 @@ export default function ChatInterface({ companionId, companionName, companionAva
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const userId = getUserId();
 
-  // Load chat history
   const { data: history } = trpc.getChatHistory.useQuery({
     userId,
     companionId,
@@ -116,6 +156,7 @@ export default function ChatInterface({ companionId, companionName, companionAva
 
   const sendMutation = trpc.sendMessage.useMutation();
   const clearMutation = trpc.clearChat.useMutation();
+  const utils = trpc.useUtils();
 
   useEffect(() => {
     if (history) {
@@ -142,6 +183,8 @@ export default function ChatInterface({ companionId, companionName, companionAva
         message: userMessage,
       });
       setMessages((prev) => [...prev, { role: response.role, content: response.content }]);
+      // Refresh relationship status after each message
+      utils.getRelationshipStatus.invalidate({ userId, companionId });
     } catch (error) {
       setMessages((prev) => [
         ...prev,
@@ -177,12 +220,15 @@ export default function ChatInterface({ companionId, companionName, companionAva
             <span className="text-xs text-green-400">● Online</span>
           </div>
         </div>
-        <button
-          onClick={handleClear}
-          className="text-xs text-gray-400 hover:text-red-400 transition-colors px-3 py-1 border border-gray-700 rounded"
-        >
-          Clear Chat
-        </button>
+        <div className="flex items-center gap-3">
+          <RelationshipIndicator userId={userId} companionId={companionId} />
+          <button
+            onClick={handleClear}
+            className="text-xs text-gray-400 hover:text-red-400 transition-colors px-3 py-1 border border-gray-700 rounded"
+          >
+            Clear Chat
+          </button>
+        </div>
       </div>
 
       {/* Messages */}
@@ -209,7 +255,6 @@ export default function ChatInterface({ companionId, companionName, companionAva
               }`}
             >
               <p className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</p>
-              {/* Audio button for assistant messages */}
               {msg.role === 'assistant' && (
                 <div className="mt-2 flex justify-end">
                   <AudioButton text={msg.content} companionId={companionId} />
