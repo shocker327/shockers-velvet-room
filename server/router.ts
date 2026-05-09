@@ -6,9 +6,20 @@ import { companions } from './companions';
 
 const t = initTRPC.create();
 
+// OpenRouter is OpenAI-API-compatible — just swap baseURL and key.
+// Falls back to OPENAI_API_KEY if OPENROUTER_API_KEY is not set.
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+  baseURL: 'https://openrouter.ai/api/v1',
+  apiKey: process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY,
+  defaultHeaders: {
+    'HTTP-Referer': 'https://shockersvelvetsuite.shop',
+    'X-Title': 'The Velvet Suite',
+  },
 });
+
+// Model can be overridden via MODEL_NAME env var; defaults to an
+// uncensored Mistral model available on OpenRouter.
+const MODEL = process.env.MODEL_NAME || 'mistralai/mistral-small-3.1-24b-instruct';
 
 export const appRouter = t.router({
   // Get all companions
@@ -76,7 +87,7 @@ export const appRouter = t.router({
         }[]
       ).reverse();
 
-      // Build messages array for OpenAI
+      // Build messages array for OpenRouter
       const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
         { role: 'system', content: companion.systemPrompt },
         ...history.map((msg) => ({
@@ -87,7 +98,7 @@ export const appRouter = t.router({
 
       try {
         const completion = await openai.chat.completions.create({
-          model: 'gpt-4.1-mini',
+          model: MODEL,
           messages,
           max_tokens: 1000,
           temperature: 0.9,

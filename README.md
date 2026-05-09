@@ -7,7 +7,7 @@
 - **Frontend:** React + TypeScript + Vite + Tailwind CSS
 - **Backend:** Node.js + Express + tRPC
 - **Database:** SQLite (better-sqlite3)
-- **AI:** OpenAI API (gpt-4.1-mini)
+- **AI:** [OpenRouter](https://openrouter.ai) API (`mistralai/mistral-small-3.1-24b-instruct` by default)
 - **Auth:** Anonymous (localStorage-based UUID)
 
 ## Features
@@ -25,6 +25,7 @@
 
 - Node.js 18+
 - npm
+- An [OpenRouter](https://openrouter.ai) API key (free tier available)
 
 ### Installation
 
@@ -37,7 +38,7 @@ cd shockers-velvet-room
 npm install
 
 # Set environment variables
-export OPENAI_API_KEY=your_openai_api_key_here
+export OPENROUTER_API_KEY=your_openrouter_api_key_here
 
 # Run in development mode
 npm run dev
@@ -54,15 +55,34 @@ npm start
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `OPENAI_API_KEY` | Yes | OpenAI API key for AI chat |
-| `PORT` | No | Server port (default: 3000, Railway provides automatically) |
+| `OPENROUTER_API_KEY` | **Yes** | OpenRouter API key for AI chat (get one free at openrouter.ai) |
+| `OPENAI_API_KEY` | No | Fallback if `OPENROUTER_API_KEY` is not set |
+| `MODEL_NAME` | No | Override the AI model (default: `mistralai/mistral-small-3.1-24b-instruct`) |
+| `PORT` | No | Server port (default: 3000; Railway provides this automatically) |
+
+### Why OpenRouter?
+
+The app uses [OpenRouter](https://openrouter.ai) instead of OpenAI directly because OpenAI's content policy blocks explicit/NSFW content regardless of system prompts. OpenRouter provides access to uncensored models (such as Mistral) that honour adult system prompts without filtering.
+
+The OpenRouter API is fully OpenAI-SDK-compatible — only the `baseURL` and API key differ.
+
+### Recommended Models on OpenRouter
+
+| Model | Notes |
+|-------|-------|
+| `mistralai/mistral-small-3.1-24b-instruct` | Default — fast, uncensored, good quality |
+| `nousresearch/hermes-3-llama-3.1-70b` | Higher quality, slower |
+| `mistralai/mistral-nemo` | Lightweight, very fast |
+
+Set `MODEL_NAME` in Railway environment variables to switch models without redeploying.
 
 ## Deployment (Railway)
 
-1. Connect this repo to Railway
-2. Add `OPENAI_API_KEY` environment variable
-3. Optionally mount a volume at `/data` for persistent SQLite storage
-4. Deploy — Railway will automatically build and start the app
+1. Connect this repo (`shocker327/shockers-velvet-room`) to Railway
+2. Add environment variable: `OPENROUTER_API_KEY` (from [openrouter.ai](https://openrouter.ai))
+3. Optionally set `MODEL_NAME` to override the default model
+4. Optionally mount a volume at `/data` for persistent SQLite storage
+5. Deploy — Railway will automatically run `npm install && npm run build` then `node dist/server/index.js`
 
 The `railway.json` is pre-configured with build and start commands.
 
@@ -70,23 +90,23 @@ The `railway.json` is pre-configured with build and start commands.
 
 ```
 /
-├── package.json          # Root package with scripts
-├── railway.json          # Railway deployment config
-├── client/               # React frontend
+├── package.json              # Root package with scripts
+├── railway.json              # Railway deployment config
+├── client/                   # React frontend
 │   ├── index.html
 │   ├── src/
 │   │   ├── main.tsx
 │   │   ├── App.tsx
-│   │   ├── pages/        # Landing, Companions, Chat, Pricing, Terms, Privacy
-│   │   ├── components/   # Header, Footer, AgeGate, CompanionCard, ChatInterface
-│   │   └── utils/        # anonymousUser.ts, trpc.ts
+│   │   ├── pages/            # Landing, Companions, Chat, Pricing, Terms, Privacy
+│   │   ├── components/       # Header, Footer, AgeGate, CompanionCard, ChatInterface
+│   │   └── utils/            # anonymousUser.ts, trpc.ts
 │   └── vite.config.ts
-├── server/               # Express + tRPC backend
-│   ├── index.ts          # Server entry point
-│   ├── router.ts         # tRPC API routes
-│   ├── db.ts             # SQLite database setup
-│   └── companions.ts     # Companion definitions
-└── tsconfig.server.json  # Server TypeScript config
+├── server/                   # Express + tRPC backend
+│   ├── index.ts              # Server entry point
+│   ├── router.ts             # tRPC API routes (OpenRouter integration)
+│   ├── db.ts                 # SQLite database setup
+│   └── companions.ts         # Companion definitions & system prompts
+└── tsconfig.server.json      # Server TypeScript config
 ```
 
 ## Contact
