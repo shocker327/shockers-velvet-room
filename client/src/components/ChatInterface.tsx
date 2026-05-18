@@ -14,7 +14,39 @@ interface ChatInterfaceProps {
   companionName: string;
   companionAvatar: string;
   gradient: string;
+  theme?: string;
 }
+
+// ─── Theme backgrounds for each companion ───────────────────────────────────
+const themeBackgrounds: Record<string, string> = {
+  'zen-garden':
+    'bg-gradient-to-b from-emerald-950/80 via-teal-950/60 to-velvet-dark',
+  'modern-lounge':
+    'bg-gradient-to-b from-orange-950/70 via-red-950/50 to-velvet-dark',
+  'moonlit-garden':
+    'bg-gradient-to-b from-indigo-950/80 via-purple-950/60 to-velvet-dark',
+  'luxury-office':
+    'bg-gradient-to-b from-rose-950/70 via-zinc-950/60 to-velvet-dark',
+};
+
+const themeOverlays: Record<string, React.CSSProperties> = {
+  'zen-garden': {
+    background:
+      'radial-gradient(ellipse at 50% 20%, rgba(16,185,129,0.12) 0%, transparent 60%), radial-gradient(ellipse at 80% 80%, rgba(20,184,166,0.08) 0%, transparent 50%)',
+  },
+  'modern-lounge': {
+    background:
+      'radial-gradient(ellipse at 30% 30%, rgba(249,115,22,0.10) 0%, transparent 60%), radial-gradient(ellipse at 70% 70%, rgba(239,68,68,0.06) 0%, transparent 50%)',
+  },
+  'moonlit-garden': {
+    background:
+      'radial-gradient(ellipse at 50% 10%, rgba(129,140,248,0.15) 0%, transparent 50%), radial-gradient(ellipse at 20% 80%, rgba(168,85,247,0.08) 0%, transparent 50%)',
+  },
+  'luxury-office': {
+    background:
+      'radial-gradient(ellipse at 60% 20%, rgba(244,63,94,0.10) 0%, transparent 50%), radial-gradient(ellipse at 40% 80%, rgba(161,161,170,0.06) 0%, transparent 50%)',
+  },
+};
 
 // ─── Helper: get time of day ─────────────────────────────────────────────────
 function getTimeOfDay(): 'morning' | 'afternoon' | 'evening' | 'night' {
@@ -179,28 +211,47 @@ function AudioButton({ text, companionId }: { text: string; companionId: string 
   return (
     <button
       onClick={handleClick}
-      className={`inline-flex items-center justify-center w-7 h-7 rounded-full transition-all duration-200 ${
-        state === 'idle'
-          ? 'text-velvet-gold hover:bg-velvet-gold/10'
-          : state === 'loading'
-          ? 'text-velvet-gold animate-pulse'
-          : 'text-velvet-gold bg-velvet-gold/20 animate-pulse'
-      }`}
-      title={state === 'playing' ? 'Stop' : 'Listen'}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '6px',
+        padding: '6px 12px',
+        borderRadius: '9999px',
+        border: '1px solid #d4af37',
+        backgroundColor: state === 'playing' ? 'rgba(212,175,55,0.25)' : 'rgba(212,175,55,0.1)',
+        color: '#d4af37',
+        fontSize: '12px',
+        fontWeight: 600,
+        cursor: 'pointer',
+        transition: 'all 0.2s',
+        minWidth: '36px',
+        minHeight: '32px',
+      }}
+      title={state === 'playing' ? 'Stop' : 'Listen to her voice'}
     >
       {state === 'loading' ? (
-        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-        </svg>
+        <>
+          <svg style={{ width: '16px', height: '16px', animation: 'spin 1s linear infinite' }} fill="none" viewBox="0 0 24 24">
+            <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          <span>Loading...</span>
+        </>
       ) : state === 'playing' ? (
-        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-          <rect x="6" y="6" width="12" height="12" rx="1" />
-        </svg>
+        <>
+          <svg style={{ width: '16px', height: '16px' }} fill="currentColor" viewBox="0 0 24 24">
+            <rect x="6" y="6" width="12" height="12" rx="1" />
+          </svg>
+          <span>Stop</span>
+        </>
       ) : (
-        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-          <path d="M11 5L6 9H2v6h4l5 4V5zM15.54 8.46a5 5 0 010 7.07l-1.41-1.41a3 3 0 000-4.24l1.41-1.42zM19.07 4.93a10 10 0 010 14.14l-1.41-1.41a8 8 0 000-11.32l1.41-1.41z" />
-        </svg>
+        <>
+          <svg style={{ width: '16px', height: '16px' }} fill="currentColor" viewBox="0 0 24 24">
+            <path d="M11 5L6 9H2v6h4l5 4V5zM15.54 8.46a5 5 0 010 7.07l-1.41-1.41a3 3 0 000-4.24l1.41-1.42zM19.07 4.93a10 10 0 010 14.14l-1.41-1.41a8 8 0 000-11.32l1.41-1.41z" />
+          </svg>
+          <span>Listen</span>
+        </>
       )}
     </button>
   );
@@ -220,13 +271,16 @@ function DailyMessageBanner({ message, companionName }: { message: string; compa
 }
 
 // ─── Main Chat Interface ─────────────────────────────────────────────────────
-export default function ChatInterface({ companionId, companionName, companionAvatar, gradient }: ChatInterfaceProps) {
+export default function ChatInterface({ companionId, companionName, companionAvatar, gradient, theme }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isGeneratingPhoto, setIsGeneratingPhoto] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const userId = getUserId();
+
+  const bgClass = theme ? themeBackgrounds[theme] || '' : '';
+  const overlayStyle = theme ? themeOverlays[theme] || {} : {};
 
   const { data: history } = trpc.getChatHistory.useQuery({
     userId,
@@ -336,9 +390,14 @@ export default function ChatInterface({ companionId, companionName, companionAva
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)] max-w-4xl mx-auto">
+    <div className={`relative flex flex-col h-[calc(100vh-4rem)] max-w-4xl mx-auto ${bgClass}`}>
+      {/* Atmospheric overlay */}
+      {theme && (
+        <div className="absolute inset-0 pointer-events-none z-0" style={overlayStyle} />
+      )}
+
       {/* Chat Header */}
-      <div className="flex items-center justify-between p-4 border-b border-purple-800/30">
+      <div className="relative z-10 flex items-center justify-between p-4 border-b border-purple-800/30 bg-velvet-dark/60 backdrop-blur-md">
         <div className="flex items-center gap-3">
           <div className={`w-10 h-10 rounded-full bg-gradient-to-br ${gradient} flex items-center justify-center text-lg`}>
             {companionAvatar}
@@ -361,11 +420,13 @@ export default function ChatInterface({ companionId, companionName, companionAva
 
       {/* Daily Message Banner */}
       {dailyMessage && dailyMessage.message && (
-        <DailyMessageBanner message={dailyMessage.message} companionName={companionName} />
+        <div className="relative z-10">
+          <DailyMessageBanner message={dailyMessage.message} companionName={companionName} />
+        </div>
       )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="relative z-10 flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 && (
           <div className="text-center text-gray-500 mt-20">
             <div className="text-4xl mb-4">{companionAvatar}</div>
@@ -383,8 +444,8 @@ export default function ChatInterface({ companionId, companionName, companionAva
             <div
               className={`max-w-[80%] rounded-2xl px-4 py-3 ${
                 msg.role === 'user'
-                  ? 'bg-purple-800/50 text-white'
-                  : 'bg-velvet-mid border border-purple-800/30 text-gray-200'
+                  ? 'bg-purple-800/50 backdrop-blur-sm text-white'
+                  : 'bg-velvet-mid/80 backdrop-blur-sm border border-purple-800/30 text-gray-200'
               }`}
             >
               <p className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</p>
@@ -399,7 +460,7 @@ export default function ChatInterface({ companionId, companionName, companionAva
         ))}
         {isLoading && (
           <div className="flex justify-start">
-            <div className="bg-velvet-mid border border-purple-800/30 rounded-2xl px-4 py-3">
+            <div className="bg-velvet-mid/80 backdrop-blur-sm border border-purple-800/30 rounded-2xl px-4 py-3">
               <div className="flex gap-1">
                 <span className="w-2 h-2 bg-velvet-gold rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
                 <span className="w-2 h-2 bg-velvet-gold rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
@@ -410,7 +471,7 @@ export default function ChatInterface({ companionId, companionName, companionAva
         )}
         {isGeneratingPhoto && (
           <div className="flex justify-start">
-            <div className="bg-velvet-mid border border-purple-800/30 rounded-2xl px-4 py-3">
+            <div className="bg-velvet-mid/80 backdrop-blur-sm border border-purple-800/30 rounded-2xl px-4 py-3">
               <div className="flex items-center gap-2 text-sm text-gray-400">
                 <svg className="w-4 h-4 animate-spin text-velvet-gold" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -425,7 +486,7 @@ export default function ChatInterface({ companionId, companionName, companionAva
       </div>
 
       {/* Input */}
-      <div className="p-4 border-t border-purple-800/30">
+      <div className="relative z-10 p-4 border-t border-purple-800/30 bg-velvet-dark/60 backdrop-blur-md">
         <div className="flex gap-3">
           <button
             onClick={handleRequestPhoto}
@@ -455,6 +516,14 @@ export default function ChatInterface({ companionId, companionName, companionAva
           </button>
         </div>
       </div>
+
+      {/* Inline keyframe for spinner (AudioButton) */}
+      <style>{`
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 }

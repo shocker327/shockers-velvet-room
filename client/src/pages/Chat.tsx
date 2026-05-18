@@ -27,6 +27,7 @@ export default function Chat() {
         companionName={companion.name}
         companionAvatar={companion.avatar}
         gradient={companion.gradient}
+        theme={companion.theme}
       />
     </div>
   );
