@@ -29,6 +29,14 @@ const themeBackgrounds: Record<string, string> = {
     'bg-gradient-to-b from-rose-950/70 via-zinc-950/60 to-velvet-dark',
 };
 
+// ─── Background image mapping (generated on first deploy) ───────────────────
+const themeBackgroundImages: Record<string, string> = {
+  'zen-garden': '/backgrounds/serena-bg.png',
+  'modern-lounge': '/backgrounds/alex-bg.png',
+  'moonlit-garden': '/backgrounds/luna-bg.png',
+  'luxury-office': '/backgrounds/victoria-bg.png',
+};
+
 const themeOverlays: Record<string, React.CSSProperties> = {
   'zen-garden': {
     background:
@@ -389,9 +397,25 @@ export default function ChatInterface({ companionId, companionName, companionAva
     }
   };
 
+  const bgImageUrl = theme ? themeBackgroundImages[theme] : undefined;
+
   return (
     <div className={`relative flex flex-col h-[calc(100vh-4rem)] max-w-4xl mx-auto ${bgClass}`}>
-      {/* Atmospheric overlay */}
+      {/* Full background image of companion */}
+      {bgImageUrl && (
+        <div
+          className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat"
+          style={{
+            backgroundImage: `url(${bgImageUrl})`,
+            opacity: 0.35,
+          }}
+        />
+      )}
+      {/* Dark overlay to ensure readability */}
+      {bgImageUrl && (
+        <div className="absolute inset-0 z-0 bg-gradient-to-b from-black/40 via-black/50 to-black/70" />
+      )}
+      {/* Atmospheric color overlay */}
       {theme && (
         <div className="absolute inset-0 pointer-events-none z-0" style={overlayStyle} />
       )}

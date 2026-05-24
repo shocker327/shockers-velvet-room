@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import * as trpcExpress from '@trpc/server/adapters/express';
 import { appRouter } from './router';
+import { generateBackgroundsIfNeeded } from './generateBackgrounds';
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -49,4 +50,8 @@ app.get('*', (req, res) => {
 // ─── Start server ─────────────────────────────────────────────────────────────
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🟣 The Velvet Suite server running on port ${PORT}`);
+  // Generate companion background images on first deploy (non-blocking)
+  generateBackgroundsIfNeeded().catch((err) => {
+    console.error('[Backgrounds] Failed to generate backgrounds:', err.message);
+  });
 });
