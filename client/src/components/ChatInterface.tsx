@@ -37,6 +37,34 @@ const themeBackgroundImages: Record<string, string> = {
   'luxury-office': '/backgrounds/victoria-bg.png',
 };
 
+// Hook to check if a background image actually exists (returns null if 404)
+function useBackgroundImage(theme?: string): string | null {
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!theme || !themeBackgroundImages[theme]) {
+      setImageUrl(null);
+      return;
+    }
+
+    const url = themeBackgroundImages[theme];
+    // Check if the image actually exists by loading it
+    const img = new Image();
+    img.onload = () => {
+      // Verify it's actually an image (not the SPA fallback HTML)
+      if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+        setImageUrl(url);
+      }
+    };
+    img.onerror = () => {
+      setImageUrl(null);
+    };
+    img.src = url;
+  }, [theme]);
+
+  return imageUrl;
+}
+
 const themeOverlays: Record<string, React.CSSProperties> = {
   'zen-garden': {
     background:
@@ -397,7 +425,7 @@ export default function ChatInterface({ companionId, companionName, companionAva
     }
   };
 
-  const bgImageUrl = theme ? themeBackgroundImages[theme] : undefined;
+  const bgImageUrl = useBackgroundImage(theme);
 
   return (
     <div className={`relative flex flex-col h-[calc(100vh-4rem)] max-w-4xl mx-auto ${bgClass}`}>

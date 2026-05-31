@@ -2,11 +2,33 @@ import OpenAI from 'openai';
 import fs from 'fs';
 import path from 'path';
 import https from 'https';
+import http from 'http';
 
-// After compilation, __dirname = <project-root>/dist/server
-// client/dist lives at <project-root>/client/dist
-// We resolve relative to process.cwd() which is the project root on Railway
-const BACKGROUNDS_DIR = path.join(process.cwd(), 'client', 'dist', 'backgrounds');
+// Use the same clientDistPath logic as index.ts
+// After compilation: __dirname = <project-root>/dist/server
+// client/dist lives at: <project-root>/client/dist
+function getBackgroundsDir(): string {
+  // Try relative to __dirname first (compiled location)
+  const fromDirname = path.resolve(__dirname, '../../client/dist/backgrounds');
+  // Also try from cwd
+  const fromCwd = path.join(process.cwd(), 'client', 'dist', 'backgrounds');
+  
+  // Check if client/dist exists from either path
+  const clientDistFromDirname = path.resolve(__dirname, '../../client/dist');
+  const clientDistFromCwd = path.join(process.cwd(), 'client', 'dist');
+  
+  if (fs.existsSync(clientDistFromDirname)) {
+    console.log(`[Backgrounds] Using path relative to __dirname: ${fromDirname}`);
+    return fromDirname;
+  } else if (fs.existsSync(clientDistFromCwd)) {
+    console.log(`[Backgrounds] Using path relative to cwd: ${fromCwd}`);
+    return fromCwd;
+  }
+  
+  // Default to cwd-based path and create it
+  console.log(`[Backgrounds] No client/dist found, creating at: ${fromCwd}`);
+  return fromCwd;
+}
 
 const companions = [
   {
@@ -33,9 +55,20 @@ const companions = [
 
 function downloadImage(url: string, filepath: string): Promise<void> {
   return new Promise((resolve, reject) => {
+    const client = url.startsWith('https') ? https : http;
     const file = fs.createWriteStream(filepath);
-    https
+    client
       .get(url, (response) => {
+        // Handle redirects
+        if (response.statusCode === 301 || response.statusCode === 302) {
+          const redirectUrl = response.headers.location;
+          if (redirectUrl) {
+            file.close();
+            fs.unlinkSync(filepath);
+            downloadImage(redirectUrl, filepath).then(resolve).catch(reject);
+            return;
+          }
+        }
         response.pipe(file);
         file.on('finish', () => {
           file.close();
@@ -50,9 +83,12 @@ function downloadImage(url: string, filepath: string): Promise<void> {
 }
 
 export async function generateBackgroundsIfNeeded(): Promise<void> {
+  const BACKGROUNDS_DIR = getBackgroundsDir();
+  
   // Create backgrounds directory if it doesn't exist
   if (!fs.existsSync(BACKGROUNDS_DIR)) {
     fs.mkdirSync(BACKGROUNDS_DIR, { recursive: true });
+    console.log(`[Backgrounds] Created directory: ${BACKGROUNDS_DIR}`);
   }
 
   // Check which backgrounds are missing
@@ -68,6 +104,12 @@ export async function generateBackgroundsIfNeeded(): Promise<void> {
   console.log(
     `[Backgrounds] Generating ${missing.length} missing background(s): ${missing.map((c) => c.id).join(', ')}`
   );
+
+  // Check if OPENAI_API_KEY is available
+  if (!process.env.OPENAI_API_KEY) {
+    console.error('[Backgrounds] No OPENAI_API_KEY found. Cannot generate backgrounds.');
+    return;
+  }
 
   const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
@@ -93,11 +135,30 @@ export async function generateBackgroundsIfNeeded(): Promise<void> {
 
       const filepath = path.join(BACKGROUNDS_DIR, `${companion.id}-bg.png`);
       await downloadImage(imageUrl, filepath);
-      console.log(`[Backgrounds] ✓ Saved: ${companion.id}-bg.png`);
+      
+      // Verify file was actually saved
+      if (fs.existsSync(filepath)) {
+        const stats = fs.statSync(filepath);
+        console.log(`[Backgrounds] ✓ Saved: ${companion.id}-bg.png (${(stats.size / 1024).toFixed(0)}KB)`);
+      } else {
+        console.error(`[Backgrounds] ✗ File not found after download: ${filepath}`);
+      }
     } catch (err: any) {
       console.error(`[Backgrounds] ✗ Error for ${companion.id}:`, err.message);
+      // If it's a content policy error, log more details
+      if (err.code === 'content_policy_violation') {
+        console.error(`[Backgrounds] Content policy violation for ${companion.id}. Try adjusting the prompt.`);
+      }
     }
   }
 
   console.log('[Backgrounds] Generation complete.');
+  
+  // List what's in the directory now
+  try {
+    const files = fs.readdirSync(BACKGROUNDS_DIR);
+    console.log(`[Backgrounds] Files in backgrounds dir: ${files.join(', ') || '(empty)'}`);
+  } catch (e) {
+    console.error('[Backgrounds] Could not list directory');
+  }
 }

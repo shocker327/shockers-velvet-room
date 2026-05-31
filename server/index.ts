@@ -31,6 +31,24 @@ app.use(
   })
 );
 
+// ─── Debug endpoint for background status ────────────────────────────────────
+app.get('/api/bg-status', (req, res) => {
+  const bgDir = path.join(clientDistPath, 'backgrounds');
+  const exists = fs.existsSync(bgDir);
+  let files: string[] = [];
+  if (exists) {
+    files = fs.readdirSync(bgDir);
+  }
+  res.json({
+    bgDir,
+    clientDistPath,
+    dirExists: exists,
+    files,
+    __dirname,
+    cwd: process.cwd(),
+  });
+});
+
 // ─── Static frontend files ────────────────────────────────────────────────────
 app.use(express.static(clientDistPath));
 
