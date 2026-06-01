@@ -31,7 +31,7 @@ app.use(
   })
 );
 
-// ─── Debug endpoint for background status ────────────────────────────────────
+//// ─── Debug endpoint for background status ───────────────────────────────
 app.get('/api/bg-status', (req, res) => {
   const bgDir = path.join(clientDistPath, 'backgrounds');
   const exists = fs.existsSync(bgDir);
@@ -47,6 +47,18 @@ app.get('/api/bg-status', (req, res) => {
     __dirname,
     cwd: process.cwd(),
   });
+});
+
+// ─── Manual trigger to regenerate backgrounds ──────────────────────────
+app.get('/api/bg-generate', async (req, res) => {
+  try {
+    await generateBackgroundsIfNeeded();
+    const bgDir = path.join(clientDistPath, 'backgrounds');
+    const files = fs.existsSync(bgDir) ? fs.readdirSync(bgDir) : [];
+    res.json({ success: true, files });
+  } catch (err: any) {
+    res.json({ success: false, error: err.message });
+  }
 });
 
 // ─── Static frontend files ────────────────────────────────────────────────────

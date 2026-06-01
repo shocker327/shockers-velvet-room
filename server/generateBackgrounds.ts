@@ -34,22 +34,22 @@ const companions = [
   {
     id: 'serena',
     prompt:
-      'A beautiful woman with long dark hair, olive skin, serene expression, wearing flowing silk robes, sitting gracefully in a peaceful zen garden with bamboo, soft candles, stone path, and warm golden lighting. Full body portrait, elegant and mystical atmosphere, soft focus background, romantic mood lighting, photorealistic, cinematic, dark moody tones, vertical composition',
+      'A serene zen garden scene at golden hour. Bamboo groves, stepping stones over a koi pond, soft candle lanterns, cherry blossom petals floating in the air. A woman with long dark hair and olive skin in elegant silk robes sits peacefully in meditation. Warm golden lighting, cinematic composition, photorealistic, portrait orientation, moody and atmospheric',
   },
   {
     id: 'alex',
     prompt:
-      'A stunning athletic woman with short red hair, bright green eyes, playful confident smirk, wearing a trendy crop top and leather jacket, relaxing on a velvet couch in a modern upscale lounge with warm orange and red neon lighting, exposed brick, cocktails nearby. Full body portrait, energetic and bold vibe, vibrant warm lighting, photorealistic, cinematic, dark moody tones, vertical composition',
+      'A modern upscale cocktail lounge with warm orange and red neon lighting, velvet couches, exposed brick walls, and ambient mood lighting. A confident woman with short red hair and green eyes in stylish streetwear sits casually on a couch. Energetic and vibrant atmosphere, cinematic composition, photorealistic, portrait orientation',
   },
   {
     id: 'luna',
     prompt:
-      'A gorgeous ethereal woman with long silver-blonde hair, pale luminous skin, dreamy blue eyes, wearing a flowing white lace dress, standing in a moonlit garden with blooming roses, fireflies, and soft purple-blue moonlight filtering through trees. Full body portrait, romantic and dreamy atmosphere, soft ethereal glow, photorealistic, cinematic, dark moody tones, vertical composition',
+      'A magical moonlit garden at night with blooming roses, fireflies, and soft purple-blue moonlight filtering through willow trees. A graceful woman with long silver-blonde hair in a flowing white dress stands among the flowers. Ethereal and dreamy atmosphere, soft glow, cinematic composition, photorealistic, portrait orientation',
   },
   {
     id: 'victoria',
     prompt:
-      'A striking powerful woman with a sleek black bob haircut, sharp elegant features, confident commanding gaze, wearing a form-fitting black designer dress, standing in a luxury penthouse with floor-to-ceiling windows showing a city skyline at night, rose gold accents, dim sophisticated lighting. Full body portrait, commanding and luxurious atmosphere, photorealistic, cinematic, dark moody tones, vertical composition',
+      'A luxury penthouse interior at night with floor-to-ceiling windows showing a glittering city skyline, rose gold accents, modern art, and sophisticated dim lighting. A poised woman with a sleek black bob haircut in an elegant black evening dress stands confidently. Commanding and luxurious atmosphere, cinematic composition, photorealistic, portrait orientation',
   },
 ];
 
