@@ -564,7 +564,7 @@ export const appRouter = t.router({
       return { imageUrl };
     }),
 
-  // Text-to-Speech
+  // Text-to-Speech (ElevenLabs)
   textToSpeech: t.procedure
     .input(
       z.object({
@@ -576,24 +576,43 @@ export const appRouter = t.router({
       const companion = companions.find((c) => c.id === input.companionId);
       if (!companion) throw new Error('Companion not found');
 
-      if (!process.env.OPENAI_API_KEY) {
-        throw new Error('TTS is not configured — OPENAI_API_KEY is required for voice messages.');
+      const elevenLabsKey = process.env.ELEVENLABS_API_KEY;
+      if (!elevenLabsKey) {
+        throw new Error('TTS is not configured — ELEVENLABS_API_KEY is required for voice messages.');
       }
 
       try {
-        const response = await openaiClient.audio.speech.create({
-          model: 'tts-1',
-          voice: companion.voice,
-          input: input.text,
-          response_format: 'mp3',
-        });
+        const response = await fetch(
+          `https://api.elevenlabs.io/v1/text-to-speech/${companion.elevenLabsVoiceId}`,
+          {
+            method: 'POST',
+            headers: {
+              'xi-api-key': elevenLabsKey,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              text: input.text,
+              model_id: 'eleven_v3',
+              voice_settings: {
+                stability: 0.4,
+                similarity_boost: 0.8,
+                style: 0.6,
+              },
+            }),
+          }
+        );
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`ElevenLabs API error: ${response.status} - ${errText}`);
+        }
 
         const arrayBuffer = await response.arrayBuffer();
         const base64 = Buffer.from(arrayBuffer).toString('base64');
 
         return { audio: base64, format: 'mp3' };
       } catch (error: any) {
-        throw new Error('Failed to generate voice message. Please try again.');
+        throw new Error(`Failed to generate voice message: ${error.message}`);
       }
     }),
 

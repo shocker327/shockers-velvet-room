@@ -7,7 +7,8 @@ export interface Companion {
   avatar: string;
   systemPrompt: string;
   gradient: string;
-  voice: 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
+  voice: string;
+  elevenLabsVoiceId: string;
   visualDescription: string;
 }
 
@@ -26,6 +27,7 @@ export const companions: Companion[] = [
     avatar: '🧘‍♀️',
     gradient: 'from-emerald-900 to-teal-900',
     voice: 'shimmer',
+    elevenLabsVoiceId: 'bv62BmVlrpG0pQegOpuN',
     visualDescription:
       'A beautiful woman with long dark hair, olive skin, serene expression, wearing flowing silk robes, soft lighting, elegant and mystical, meditation/zen aesthetic',
     systemPrompt:
@@ -41,6 +43,7 @@ export const companions: Companion[] = [
     avatar: '⚡',
     gradient: 'from-orange-900 to-red-900',
     voice: 'nova',
+    elevenLabsVoiceId: 'o9yXv9EFSasRrRM3x6xK',
     visualDescription:
       'A stunning athletic woman with short red hair, bright green eyes, playful smirk, wearing trendy streetwear or workout clothes, energetic and bold, vibrant lighting',
     systemPrompt:
@@ -56,6 +59,7 @@ export const companions: Companion[] = [
     avatar: '🌙',
     gradient: 'from-indigo-900 to-purple-900',
     voice: 'alloy',
+    elevenLabsVoiceId: 'j05EIz3iI3JmBTWC3CsA',
     visualDescription:
       'A gorgeous ethereal woman with long silver-blonde hair, pale skin, dreamy blue eyes, wearing soft lace or flowing dresses, moonlit romantic aesthetic, soft and dreamy',
     systemPrompt:
@@ -71,6 +75,7 @@ export const companions: Companion[] = [
     avatar: '👑',
     gradient: 'from-rose-900 to-zinc-900',
     voice: 'onyx',
+    elevenLabsVoiceId: 'TC0Zp7WVFzhA8zpTlRqV',
     visualDescription:
       'A striking powerful woman with sleek black bob haircut, sharp features, confident gaze, wearing designer business attire or elegant evening wear, luxury aesthetic, commanding presence',
     systemPrompt:
