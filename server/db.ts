@@ -112,6 +112,20 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_custom_companions_user
     ON custom_companions(user_id);
+
+  CREATE TABLE IF NOT EXISTS voice_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    companion_id TEXT NOT NULL,
+    text_content TEXT NOT NULL,
+    audio_base64 TEXT NOT NULL,
+    duration_seconds REAL DEFAULT 0,
+    played INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_voice_messages_user_companion
+    ON voice_messages(user_id, companion_id, created_at);
 `);
 
 // Migration: add avatar_image_url column if it doesn't exist

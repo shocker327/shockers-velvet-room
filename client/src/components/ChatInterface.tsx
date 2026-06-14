@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { trpc } from '../utils/trpc';
 import { getUserId } from '../utils/anonymousUser';
+import VoiceNoteBubble from './VoiceNoteBubble';
 
 interface Message {
   role: string;
@@ -351,6 +352,13 @@ export default function ChatInterface({ companionId, companionName, companionAva
     timeOfDay: getTimeOfDay(),
   });
 
+  // Fetch proactive voice message
+  const { data: voiceMessage } = trpc.getProactiveVoiceMessage.useQuery({
+    userId,
+    companionId,
+  });
+  const markVoicePlayedMutation = trpc.markVoicePlayed.useMutation();
+
   const sendMutation = trpc.sendMessage.useMutation();
   const clearMutation = trpc.clearChat.useMutation();
   const generateImageMutation = trpc.generateImage.useMutation();
@@ -494,6 +502,21 @@ export default function ChatInterface({ companionId, companionName, companionAva
       {dailyMessage && dailyMessage.message && (
         <div className="relative z-10">
           <DailyMessageBanner message={dailyMessage.message} companionName={companionName} />
+        </div>
+      )}
+
+      {/* Proactive Voice Message */}
+      {voiceMessage && voiceMessage.audio && (
+        <div className="relative z-10 px-4 pt-3">
+          <VoiceNoteBubble
+            audioBase64={voiceMessage.audio}
+            duration={voiceMessage.duration}
+            companionName={companionName}
+            text={voiceMessage.text}
+            onPlay={() => {
+              markVoicePlayedMutation.mutate({ id: voiceMessage.id });
+            }}
+          />
         </div>
       )}
 

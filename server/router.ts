@@ -364,6 +364,141 @@ function generateVisualDescription(data: any): string {
   return `A beautiful ${ageDesc}, ${data.ethnicity}, ${data.body_type} body type, ${data.bust_size} bust, ${data.hair_color} ${data.hair_style} hair, ${data.eye_color} eyes, wearing ${data.outfit}, photorealistic, professional photography, beautiful lighting`;
 }
 
+// ─── Proactive Voice Message Generation ─────────────────────────────────────
+const VOICE_MESSAGE_COOLDOWN_HOURS = 4;
+
+// Companion-specific voice message styles
+const voiceMessageStyles: Record<string, string> = {
+  serena: 'sensual, intimate, soft-spoken, breathy, like a whispered secret between lovers',
+  alex: 'bold, playful, teasing, energetic, like a flirty dare with a laugh in her voice',
+  luna: 'dreamy, mysterious, poetic, ethereal, like a moonlit confession of desire',
+  victoria: 'commanding, teasing, confident, powerful, like she owns you and knows it',
+};
+
+function getVoiceMessageStyle(companionId: string): string {
+  return voiceMessageStyles[companionId] || 'flirty, sexy, intimate, thinking-of-you';
+}
+
+async function generateVoiceMessageText(
+  userId: string,
+  companionId: string,
+  companion: Companion,
+  hoursSinceLastVisit: number
+): Promise<string> {
+  const row = db.prepare(
+    'SELECT message_count, level FROM relationship_progress WHERE user_id = ? AND companion_id = ?'
+  ).get(userId, companionId) as { message_count: number; level: number } | undefined;
+
+  const level = row?.level || 1;
+  const memoriesText = getMemoriesAsText(userId, companionId);
+  const style = getVoiceMessageStyle(companionId);
+
+  // Get user's name from memories
+  const nameMemory = db.prepare(
+    "SELECT memory_value FROM memories WHERE user_id = ? AND companion_id = ? AND memory_key = 'name' LIMIT 1"
+  ).get(userId, companionId) as { memory_value: string } | undefined;
+  const userName = nameMemory?.memory_value || 'baby';
+
+  const hour = new Date().getHours();
+  let timeContext = 'late at night';
+  if (hour >= 5 && hour < 12) timeContext = 'in the morning';
+  else if (hour >= 12 && hour < 17) timeContext = 'in the afternoon';
+  else if (hour >= 17 && hour < 21) timeContext = 'in the evening';
+
+  let timeApartContext = '';
+  if (hoursSinceLastVisit >= 24) {
+    timeApartContext = `It's been over a day since you last talked. You really missed them.`;
+  } else if (hoursSinceLastVisit >= 12) {
+    timeApartContext = `It's been half a day since you last talked. You've been thinking about them.`;
+  } else {
+    timeApartContext = `It's been a few hours. You just couldn't stop thinking about them.`;
+  }
+
+  const prompt = `You are ${companion.name}. Generate a SHORT voice message (1-2 sentences MAX, under 20 words ideally) that you're sending as a voice note to ${userName}. You're thinking about them and decided to record a quick sexy/flirty voice message.
+
+Your style: ${style}
+Time: It's ${timeContext}
+${timeApartContext}
+Relationship level: ${level} - ${getRelationshipLevelDescription(level)}
+What you know about them: ${memoriesText}
+
+Rules:
+- Keep it SHORT — this is a quick voice note, not a paragraph
+- Be provocative, suggestive, and intimate (especially at higher levels)
+- Reference the time of day or how long it's been naturally
+- Sound natural and spontaneous, like you just grabbed your phone to record
+- NO emojis, NO quotation marks, NO labels — just the spoken words
+- Include natural speech patterns like "mmm", "hey", sighs, or trailing off...`;
+
+  try {
+    const completion = await chatClient.chat.completions.create({
+      model: MODEL,
+      messages: [
+        { role: 'system', content: companion.systemPrompt },
+        { role: 'user', content: prompt },
+      ],
+      max_tokens: 100,
+      temperature: 0.95,
+    });
+
+    return completion.choices[0]?.message?.content?.trim() || `Hey... I can't stop thinking about you.`;
+  } catch (error) {
+    console.error('Voice message text generation failed:', error);
+    return `Mmm... hey. I was just thinking about you and had to hear your voice.`;
+  }
+}
+
+async function generateVoiceAudio(
+  text: string,
+  voiceId: string
+): Promise<{ audio: string; duration: number } | null> {
+  const elevenLabsKey = process.env.ELEVENLABS_API_KEY;
+  if (!elevenLabsKey) {
+    console.error('ELEVENLABS_API_KEY not set — cannot generate voice message');
+    return null;
+  }
+
+  try {
+    const response = await fetch(
+      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+      {
+        method: 'POST',
+        headers: {
+          'xi-api-key': elevenLabsKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text,
+          model_id: 'eleven_v3',
+          voice_settings: {
+            stability: 0.35,
+            similarity_boost: 0.85,
+            style: 0.7,
+          },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error(`ElevenLabs voice message error: ${response.status} - ${errText}`);
+      return null;
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString('base64');
+
+    // Estimate duration: ~150 words per minute for intimate speech, avg 5 chars per word
+    const wordCount = text.split(/\s+/).length;
+    const estimatedDuration = Math.max(2, (wordCount / 150) * 60);
+
+    return { audio: base64, duration: estimatedDuration };
+  } catch (error) {
+    console.error('Voice audio generation failed:', error);
+    return null;
+  }
+}
+
 // ─── tRPC Router ─────────────────────────────────────────────────────────────
 export const appRouter = t.router({
   // Get all companions (default + custom for user)
@@ -494,6 +629,103 @@ export const appRouter = t.router({
       db.prepare(
         'UPDATE daily_messages SET read = 1 WHERE user_id = ? AND companion_id = ? AND generated_date = ?'
       ).run(input.userId, input.companionId, today);
+      return { success: true };
+    }),
+
+  // ─── Proactive Voice Messages ─────────────────────────────────────────────
+  // Check if a proactive voice message is available (time-gated)
+  getProactiveVoiceMessage: t.procedure
+    .input(
+      z.object({
+        userId: z.string(),
+        companionId: z.string(),
+      })
+    )
+    .query(async ({ input }) => {
+      const companion = resolveCompanion(input.companionId);
+      if (!companion) return null;
+
+      // Only generate if the user has chatted with this companion before
+      const hasHistory = db.prepare(
+        'SELECT 1 FROM messages WHERE user_id = ? AND companion_id = ? LIMIT 1'
+      ).get(input.userId, input.companionId);
+      if (!hasHistory) return null;
+
+      // Check cooldown: find the most recent voice message
+      const lastVoiceMsg = db.prepare(
+        'SELECT created_at FROM voice_messages WHERE user_id = ? AND companion_id = ? ORDER BY created_at DESC LIMIT 1'
+      ).get(input.userId, input.companionId) as { created_at: string } | undefined;
+
+      const now = Date.now();
+      let hoursSinceLastVoice = 999; // Default: long time ago
+      if (lastVoiceMsg) {
+        const lastTime = new Date(lastVoiceMsg.created_at + 'Z').getTime();
+        hoursSinceLastVoice = (now - lastTime) / (1000 * 60 * 60);
+        if (hoursSinceLastVoice < VOICE_MESSAGE_COOLDOWN_HOURS) {
+          // Check if there's an unplayed recent message to return
+          const unplayed = db.prepare(
+            'SELECT id, text_content, audio_base64, duration_seconds, created_at FROM voice_messages WHERE user_id = ? AND companion_id = ? AND played = 0 ORDER BY created_at DESC LIMIT 1'
+          ).get(input.userId, input.companionId) as any;
+          if (unplayed) {
+            return {
+              id: unplayed.id,
+              text: unplayed.text_content,
+              audio: unplayed.audio_base64,
+              duration: unplayed.duration_seconds,
+              createdAt: unplayed.created_at,
+            };
+          }
+          return null; // Cooldown active, no unplayed messages
+        }
+      }
+
+      // Calculate hours since last chat message (for context)
+      const lastChatMsg = db.prepare(
+        'SELECT created_at FROM messages WHERE user_id = ? AND companion_id = ? ORDER BY created_at DESC LIMIT 1'
+      ).get(input.userId, input.companionId) as { created_at: string } | undefined;
+
+      let hoursSinceLastChat = 24;
+      if (lastChatMsg) {
+        const lastChatTime = new Date(lastChatMsg.created_at + 'Z').getTime();
+        hoursSinceLastChat = (now - lastChatTime) / (1000 * 60 * 60);
+      }
+
+      // Only send if at least 4 hours since last chat OR last voice message
+      if (hoursSinceLastChat < VOICE_MESSAGE_COOLDOWN_HOURS && hoursSinceLastVoice < VOICE_MESSAGE_COOLDOWN_HOURS) {
+        return null;
+      }
+
+      // Generate the voice message text
+      const text = await generateVoiceMessageText(
+        input.userId,
+        input.companionId,
+        companion,
+        hoursSinceLastChat
+      );
+
+      // Generate the audio
+      const audioResult = await generateVoiceAudio(text, companion.elevenLabsVoiceId);
+      if (!audioResult) return null;
+
+      // Store in database
+      const result = db.prepare(
+        'INSERT INTO voice_messages (user_id, companion_id, text_content, audio_base64, duration_seconds) VALUES (?, ?, ?, ?, ?)'
+      ).run(input.userId, input.companionId, text, audioResult.audio, audioResult.duration);
+
+      return {
+        id: Number(result.lastInsertRowid),
+        text,
+        audio: audioResult.audio,
+        duration: audioResult.duration,
+        createdAt: new Date().toISOString(),
+      };
+    }),
+
+  // Mark a voice message as played
+  markVoicePlayed: t.procedure
+    .input(z.object({ id: z.number() }))
+    .mutation(({ input }) => {
+      db.prepare('UPDATE voice_messages SET played = 1 WHERE id = ?').run(input.id);
       return { success: true };
     }),
 
