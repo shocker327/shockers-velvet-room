@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { trpc } from '../utils/trpc';
 import { getUserId } from '../utils/anonymousUser';
 import VoiceNoteBubble from './VoiceNoteBubble';
+import DateModeOverlay from './DateModeOverlay';
 
 interface Message {
   role: string;
@@ -42,10 +44,23 @@ const themeBackgroundImages: Record<string, string> = {
 };
 
 // Hook to check if a background image actually exists (returns null if 404)
-function useBackgroundImage(theme?: string, customImageUrl?: string): string | null {
+function useBackgroundImage(theme?: string, customImageUrl?: string, dateSceneUrl?: string | null): string | null {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
 
   useEffect(() => {
+    // Date scene image takes priority
+    if (dateSceneUrl) {
+      const img = new Image();
+      img.onload = () => {
+        if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+          setImageUrl(dateSceneUrl);
+        }
+      };
+      img.onerror = () => setImageUrl(null);
+      img.src = dateSceneUrl;
+      return;
+    }
+
     // If a custom image URL is provided (from fal.ai), use it directly
     if (customImageUrl) {
       const img = new Image();
@@ -77,7 +92,7 @@ function useBackgroundImage(theme?: string, customImageUrl?: string): string | n
       setImageUrl(null);
     };
     img.src = url;
-  }, [theme, customImageUrl]);
+  }, [theme, customImageUrl, dateSceneUrl]);
 
   return imageUrl;
 }
@@ -335,6 +350,8 @@ export default function ChatInterface({ companionId, companionName, companionAva
   const [isGeneratingPhoto, setIsGeneratingPhoto] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const userId = getUserId();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const bgClass = theme ? themeBackgrounds[theme] || '' : '';
   const overlayStyle = theme ? themeOverlays[theme] || {} : {};
@@ -359,7 +376,17 @@ export default function ChatInterface({ companionId, companionName, companionAva
   });
   const markVoicePlayedMutation = trpc.markVoicePlayed.useMutation();
 
+  // ─── Date Mode State ───────────────────────────────────────────────────────
+  const { data: activeDate, refetch: refetchDate } = trpc.getActiveDate.useQuery(
+    { userId, companionId },
+    { refetchOnWindowFocus: false }
+  );
+
+  const isDateMode = !!activeDate;
+  const dateSceneUrl = activeDate?.sceneImageUrl || null;
+
   const sendMutation = trpc.sendMessage.useMutation();
+  const sendDateMutation = trpc.sendDateMessage.useMutation();
   const clearMutation = trpc.clearChat.useMutation();
   const generateImageMutation = trpc.generateImage.useMutation();
   const markReadMutation = trpc.markDailyRead.useMutation();
@@ -394,15 +421,32 @@ export default function ChatInterface({ companionId, companionName, companionAva
     setIsLoading(true);
 
     try {
-      const response = await sendMutation.mutateAsync({
-        userId,
-        companionId,
-        message: userMessage,
-      });
-      setMessages((prev) => [
-        ...prev,
-        { role: response.role, content: response.content, image: response.image },
-      ]);
+      if (isDateMode && activeDate) {
+        // Date mode messaging
+        const response = await sendDateMutation.mutateAsync({
+          userId,
+          companionId,
+          message: userMessage,
+          sessionId: activeDate.sessionId,
+        });
+        setMessages((prev) => [
+          ...prev,
+          { role: response.role, content: response.content },
+        ]);
+        // Refetch date state to get updated choices
+        refetchDate();
+      } else {
+        // Normal messaging
+        const response = await sendMutation.mutateAsync({
+          userId,
+          companionId,
+          message: userMessage,
+        });
+        setMessages((prev) => [
+          ...prev,
+          { role: response.role, content: response.content, image: response.image },
+        ]);
+      }
       utils.getRelationshipStatus.invalidate({ userId, companionId });
     } catch (error) {
       setMessages((prev) => [
@@ -453,17 +497,26 @@ export default function ChatInterface({ companionId, companionName, companionAva
     }
   };
 
-  const bgImageUrl = useBackgroundImage(theme, avatarImageUrl);
+  const handleDateChoiceMade = (reply: string) => {
+    setMessages((prev) => [...prev, { role: 'assistant', content: reply }]);
+    refetchDate();
+  };
+
+  const handleEndDate = () => {
+    refetchDate();
+  };
+
+  const bgImageUrl = useBackgroundImage(theme, avatarImageUrl, dateSceneUrl);
 
   return (
     <div className={`relative flex flex-col h-[calc(100vh-4rem)] max-w-4xl mx-auto ${bgClass}`}>
-      {/* Full background image of companion */}
+      {/* Full background image of companion / date scene */}
       {bgImageUrl && (
         <div
           className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat"
           style={{
             backgroundImage: `url(${bgImageUrl})`,
-            opacity: 0.35,
+            opacity: isDateMode ? 0.45 : 0.35,
           }}
         />
       )}
@@ -472,8 +525,14 @@ export default function ChatInterface({ companionId, companionName, companionAva
         <div className="absolute inset-0 z-0 bg-gradient-to-b from-black/40 via-black/50 to-black/70" />
       )}
       {/* Atmospheric color overlay */}
-      {theme && (
+      {theme && !isDateMode && (
         <div className="absolute inset-0 pointer-events-none z-0" style={overlayStyle} />
+      )}
+      {/* Date mode warm overlay */}
+      {isDateMode && (
+        <div className="absolute inset-0 pointer-events-none z-0" style={{
+          background: 'radial-gradient(ellipse at 50% 30%, rgba(212,175,55,0.08) 0%, transparent 60%), radial-gradient(ellipse at 50% 80%, rgba(139,69,19,0.06) 0%, transparent 50%)',
+        }} />
       )}
 
       {/* Chat Header */}
@@ -489,6 +548,16 @@ export default function ChatInterface({ companionId, companionName, companionAva
         </div>
         <div className="flex items-center gap-3">
           <RelationshipIndicator userId={userId} companionId={companionId} />
+          {!isDateMode && (
+            <button
+              onClick={() => navigate(`/date/${companionId}`)}
+              className="text-xs text-velvet-gold hover:text-white transition-colors px-3 py-1 border border-velvet-gold/40 hover:border-velvet-gold rounded flex items-center gap-1"
+              title="Start a date"
+            >
+              <span>🌹</span>
+              <span className="hidden sm:inline">Date Night</span>
+            </button>
+          )}
           <button
             onClick={handleClear}
             className="text-xs text-gray-400 hover:text-red-400 transition-colors px-3 py-1 border border-gray-700 rounded"
@@ -498,15 +567,30 @@ export default function ChatInterface({ companionId, companionName, companionAva
         </div>
       </div>
 
+      {/* Date Mode Overlay */}
+      {isDateMode && activeDate && (
+        <DateModeOverlay
+          sessionId={activeDate.sessionId}
+          companionId={companionId}
+          companionName={companionName}
+          scenarioName={activeDate.scenarioName}
+          scenarioIcon={activeDate.scenarioIcon}
+          sceneImageUrl={activeDate.sceneImageUrl}
+          nextChoice={activeDate.nextChoice}
+          onChoiceMade={handleDateChoiceMade}
+          onEndDate={handleEndDate}
+        />
+      )}
+
       {/* Daily Message Banner */}
-      {dailyMessage && dailyMessage.message && (
+      {!isDateMode && dailyMessage && dailyMessage.message && (
         <div className="relative z-10">
           <DailyMessageBanner message={dailyMessage.message} companionName={companionName} />
         </div>
       )}
 
       {/* Proactive Voice Message */}
-      {voiceMessage && voiceMessage.audio && (
+      {!isDateMode && voiceMessage && voiceMessage.audio && (
         <div className="relative z-10 px-4 pt-3">
           <VoiceNoteBubble
             audioBase64={voiceMessage.audio}
@@ -522,13 +606,22 @@ export default function ChatInterface({ companionId, companionName, companionAva
 
       {/* Messages */}
       <div className="relative z-10 flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.length === 0 && (
+        {messages.length === 0 && !isDateMode && (
           <div className="text-center text-gray-500 mt-20">
             <div className="text-4xl mb-4">{companionAvatar}</div>
             <p className="font-heading text-xl text-velvet-gold mb-2">
               Start a conversation with {companionName}
             </p>
             <p className="text-sm">Say hello and see where the conversation takes you...</p>
+          </div>
+        )}
+        {messages.length === 0 && isDateMode && (
+          <div className="text-center text-gray-500 mt-20">
+            <div className="text-4xl mb-4">🌹</div>
+            <p className="font-heading text-xl text-velvet-gold mb-2">
+              Your date with {companionName} is starting...
+            </p>
+            <p className="text-sm">The scene is set. Say something to begin.</p>
           </div>
         )}
         {messages.map((msg, idx) => (
@@ -583,22 +676,24 @@ export default function ChatInterface({ companionId, companionName, companionAva
       {/* Input */}
       <div className="relative z-10 p-4 border-t border-purple-800/30 bg-velvet-dark/60 backdrop-blur-md">
         <div className="flex gap-3">
-          <button
-            onClick={handleRequestPhoto}
-            disabled={isGeneratingPhoto || isLoading}
-            className="flex items-center justify-center w-12 h-12 rounded-xl bg-velvet-mid border border-purple-800/30 text-velvet-gold hover:bg-velvet-gold/10 hover:border-velvet-gold/30 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Request a photo"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z" />
-            </svg>
-          </button>
+          {!isDateMode && (
+            <button
+              onClick={handleRequestPhoto}
+              disabled={isGeneratingPhoto || isLoading}
+              className="flex items-center justify-center w-12 h-12 rounded-xl bg-velvet-mid border border-purple-800/30 text-velvet-gold hover:bg-velvet-gold/10 hover:border-velvet-gold/30 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Request a photo"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z" />
+              </svg>
+            </button>
+          )}
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={`Message ${companionName}...`}
+            placeholder={isDateMode ? `Say something to ${companionName}...` : `Message ${companionName}...`}
             rows={1}
             className="flex-1 bg-velvet-mid border border-purple-800/30 rounded-xl px-4 py-3 text-white placeholder-gray-500 resize-none focus:outline-none focus:border-velvet-gold/50 transition-colors"
           />

@@ -4,6 +4,7 @@ import OpenAI from 'openai';
 import { v4 as uuidv4 } from 'uuid';
 import db from './db';
 import { companions, Companion } from './companions';
+import { dateScenarios, getScenarioById, getAvailableScenarios, DateScenario } from './dateScenarios';
 
 const t = initTRPC.create();
 
@@ -1067,6 +1068,391 @@ export const appRouter = t.router({
         }
         throw error;
       }
+    }),
+
+  // ─── Date Night Feature ─────────────────────────────────────────────────────
+
+  // Get user tier
+  getUserTier: t.procedure
+    .input(z.object({ userId: z.string() }))
+    .query(({ input }) => {
+      const row = db.prepare('SELECT tier FROM user_tiers WHERE user_id = ?').get(input.userId) as { tier: string } | undefined;
+      return { tier: (row?.tier || 'paid') as 'free' | 'paid' | 'premium' };
+    }),
+
+  // Set user tier (for testing/admin)
+  setUserTier: t.procedure
+    .input(z.object({ userId: z.string(), tier: z.enum(['free', 'paid', 'premium']) }))
+    .mutation(({ input }) => {
+      const existing = db.prepare('SELECT user_id FROM user_tiers WHERE user_id = ?').get(input.userId);
+      if (existing) {
+        db.prepare('UPDATE user_tiers SET tier = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?').run(input.tier, input.userId);
+      } else {
+        db.prepare('INSERT INTO user_tiers (user_id, tier) VALUES (?, ?)').run(input.userId, input.tier);
+      }
+      return { success: true };
+    }),
+
+  // Get available date scenarios based on user tier
+  getDateScenarios: t.procedure
+    .input(z.object({ userId: z.string() }))
+    .query(({ input }) => {
+      const row = db.prepare('SELECT tier FROM user_tiers WHERE user_id = ?').get(input.userId) as { tier: string } | undefined;
+      const tier = (row?.tier || 'paid') as 'free' | 'paid' | 'premium';
+      const allScenarios = dateScenarios.map(({ systemPromptAddition, ...rest }) => rest);
+      const available = getAvailableScenarios(tier).map((s) => s.id);
+      return {
+        scenarios: allScenarios,
+        availableIds: available,
+        userTier: tier,
+      };
+    }),
+
+  // Start a date session
+  startDate: t.procedure
+    .input(z.object({
+      userId: z.string(),
+      companionId: z.string(),
+      scenarioId: z.string(),
+    }))
+    .mutation(async ({ input }) => {
+      const companion = resolveCompanion(input.companionId);
+      if (!companion) throw new Error('Companion not found');
+
+      const scenario = getScenarioById(input.scenarioId);
+      if (!scenario) throw new Error('Scenario not found');
+
+      // Check tier access
+      const row = db.prepare('SELECT tier FROM user_tiers WHERE user_id = ?').get(input.userId) as { tier: string } | undefined;
+      const tier = (row?.tier || 'paid') as 'free' | 'paid' | 'premium';
+      const available = getAvailableScenarios(tier).map((s) => s.id);
+      if (!available.includes(input.scenarioId)) {
+        throw new Error('This scenario requires a higher tier subscription.');
+      }
+
+      // End any active date session for this user+companion
+      db.prepare(
+        "UPDATE date_sessions SET status = 'ended', ended_at = CURRENT_TIMESTAMP WHERE user_id = ? AND companion_id = ? AND status = 'active'"
+      ).run(input.userId, input.companionId);
+
+      // Generate scene image via fal.ai
+      let sceneImageUrl: string | null = null;
+      const falKey = process.env.FAL_KEY;
+      if (falKey) {
+        try {
+          const imagePrompt = `${companion.visualDescription}, in scene: ${scenario.imagePromptTemplate}`;
+          const falResponse = await fetch('https://fal.run/fal-ai/flux/dev', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Key ${falKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              prompt: imagePrompt,
+              image_size: 'landscape_16_9',
+              num_images: 1,
+              enable_safety_checker: false,
+            }),
+          });
+          if (falResponse.ok) {
+            const falData = await falResponse.json();
+            sceneImageUrl = falData?.images?.[0]?.url || null;
+          } else {
+            console.error('fal.ai date scene generation failed:', await falResponse.text());
+          }
+        } catch (err) {
+          console.error('Failed to generate date scene image:', err);
+        }
+      }
+
+      // Create the date session
+      const sessionId = `date-${uuidv4()}`;
+      db.prepare(
+        'INSERT INTO date_sessions (id, user_id, companion_id, scenario_id, status, scene_image_url) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(sessionId, input.userId, input.companionId, input.scenarioId, 'active', sceneImageUrl);
+
+      // Generate the opening message from the companion
+      const openingPrompt = `${companion.systemPrompt}\n\n${scenario.systemPromptAddition}\n\n[You are starting a date with the user. Set the scene vividly. Describe where you are, what you're wearing, the atmosphere. Be excited and flirty. Make them feel special for taking you here. Keep it to 2-3 paragraphs.]`;
+
+      let openingMessage = `*looks around excitedly* This place is amazing... I'm so glad you brought me here.`;
+      try {
+        const completion = await chatClient.chat.completions.create({
+          model: MODEL,
+          messages: [
+            { role: 'system', content: openingPrompt },
+            { role: 'user', content: `Let's start our date at the ${scenario.name}. Set the scene for me.` },
+          ],
+          max_tokens: 500,
+          temperature: 0.9,
+        });
+        openingMessage = completion.choices[0]?.message?.content || openingMessage;
+      } catch (err) {
+        console.error('Date opening message generation failed:', err);
+      }
+
+      // Save the opening exchange as messages
+      const insertStmt = db.prepare(
+        'INSERT INTO messages (user_id, companion_id, role, content) VALUES (?, ?, ?, ?)'
+      );
+      insertStmt.run(input.userId, input.companionId, 'user', `[Started a date: ${scenario.name}]`);
+      insertStmt.run(input.userId, input.companionId, 'assistant', openingMessage);
+
+      // Update date session message count
+      db.prepare('UPDATE date_sessions SET message_count = 1 WHERE id = ?').run(sessionId);
+
+      return {
+        sessionId,
+        sceneImageUrl,
+        openingMessage,
+        scenario: {
+          id: scenario.id,
+          name: scenario.name,
+          icon: scenario.icon,
+        },
+      };
+    }),
+
+  // Get active date session
+  getActiveDate: t.procedure
+    .input(z.object({ userId: z.string(), companionId: z.string() }))
+    .query(({ input }) => {
+      const session = db.prepare(
+        "SELECT * FROM date_sessions WHERE user_id = ? AND companion_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1"
+      ).get(input.userId, input.companionId) as any;
+
+      if (!session) return null;
+
+      const scenario = getScenarioById(session.scenario_id);
+      if (!scenario) return null;
+
+      const choicesMade = JSON.parse(session.choices_made || '[]') as string[];
+
+      // Determine next available choice
+      let nextChoice = null;
+      for (const choice of scenario.interactiveChoices) {
+        if (!choicesMade.includes(choice.id) && session.message_count >= choice.triggerAfterMessages) {
+          nextChoice = {
+            id: choice.id,
+            momentDescription: choice.momentDescription,
+            options: choice.options.map(({ followUpPrompt, ...rest }) => rest),
+          };
+          break;
+        }
+      }
+
+      return {
+        sessionId: session.id,
+        scenarioId: session.scenario_id,
+        scenarioName: scenario.name,
+        scenarioIcon: scenario.icon,
+        sceneImageUrl: session.scene_image_url,
+        messageCount: session.message_count,
+        choicesMade,
+        nextChoice,
+        isNSFW: scenario.isNSFW,
+      };
+    }),
+
+  // Send a message during a date (enhanced with date mode context)
+  sendDateMessage: t.procedure
+    .input(z.object({
+      userId: z.string(),
+      companionId: z.string(),
+      message: z.string(),
+      sessionId: z.string(),
+    }))
+    .mutation(async ({ input }) => {
+      const companion = resolveCompanion(input.companionId);
+      if (!companion) throw new Error('Companion not found');
+
+      const session = db.prepare('SELECT * FROM date_sessions WHERE id = ? AND status = ?').get(input.sessionId, 'active') as any;
+      if (!session) throw new Error('No active date session');
+
+      const scenario = getScenarioById(session.scenario_id);
+      if (!scenario) throw new Error('Scenario not found');
+
+      // Save user message
+      const insertStmt = db.prepare(
+        'INSERT INTO messages (user_id, companion_id, role, content) VALUES (?, ?, ?, ?)'
+      );
+      insertStmt.run(input.userId, input.companionId, 'user', input.message);
+
+      // Increment message count and relationship
+      const newMsgCount = (session.message_count || 0) + 1;
+      db.prepare('UPDATE date_sessions SET message_count = ? WHERE id = ?').run(newMsgCount, input.sessionId);
+      const { level } = incrementMessageCount(input.userId, input.companionId);
+
+      // Get memories
+      const memoryContext = getMemoriesForPrompt(input.userId, input.companionId);
+      const relationshipPrompt = getRelationshipPrompt(level);
+
+      // Build date-mode system prompt
+      const dateSystemPrompt = `${relationshipPrompt}\n\n${companion.systemPrompt}\n\n${scenario.systemPromptAddition}${memoryContext}\n\n[IMPORTANT: Stay in character for this date scenario. Be vivid, descriptive of the setting, and interactive. Keep responses 1-3 paragraphs. Be flirty and engaged with the date experience.]`;
+
+      // Get recent history
+      const historyStmt = db.prepare(
+        'SELECT role, content FROM messages WHERE user_id = ? AND companion_id = ? ORDER BY created_at DESC LIMIT 15'
+      );
+      const history = (historyStmt.all(input.userId, input.companionId) as { role: string; content: string }[]).reverse();
+
+      const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+        { role: 'system', content: dateSystemPrompt },
+        ...history
+          .filter((msg) => msg.role === 'user' || msg.role === 'assistant')
+          .map((msg) => ({ role: msg.role as 'user' | 'assistant', content: msg.content })),
+      ];
+
+      try {
+        const completion = await chatClient.chat.completions.create({
+          model: MODEL,
+          messages,
+          max_tokens: 800,
+          temperature: 0.9,
+        });
+
+        const reply = completion.choices[0]?.message?.content || 'I am lost in the moment...';
+        insertStmt.run(input.userId, input.companionId, 'assistant', reply);
+
+        // Extract memories in background
+        extractMemories(input.userId, input.companionId, input.message).catch(() => {});
+
+        // Check for next interactive choice
+        const choicesMade = JSON.parse(session.choices_made || '[]') as string[];
+        let nextChoice = null;
+        for (const choice of scenario.interactiveChoices) {
+          if (!choicesMade.includes(choice.id) && newMsgCount >= choice.triggerAfterMessages) {
+            nextChoice = {
+              id: choice.id,
+              momentDescription: choice.momentDescription,
+              options: choice.options.map(({ followUpPrompt, ...rest }) => rest),
+            };
+            break;
+          }
+        }
+
+        return { role: 'assistant' as const, content: reply, nextChoice };
+      } catch (error: any) {
+        console.error('Date message error:', error);
+        return { role: 'assistant' as const, content: 'I seem to be having trouble... let me gather my thoughts.', nextChoice: null };
+      }
+    }),
+
+  // Make an interactive choice during a date
+  makeDateChoice: t.procedure
+    .input(z.object({
+      userId: z.string(),
+      companionId: z.string(),
+      sessionId: z.string(),
+      choiceId: z.string(),
+      optionId: z.string(),
+    }))
+    .mutation(async ({ input }) => {
+      const companion = resolveCompanion(input.companionId);
+      if (!companion) throw new Error('Companion not found');
+
+      const session = db.prepare('SELECT * FROM date_sessions WHERE id = ? AND status = ?').get(input.sessionId, 'active') as any;
+      if (!session) throw new Error('No active date session');
+
+      const scenario = getScenarioById(session.scenario_id);
+      if (!scenario) throw new Error('Scenario not found');
+
+      // Find the choice and option
+      const choice = scenario.interactiveChoices.find((c) => c.id === input.choiceId);
+      if (!choice) throw new Error('Choice not found');
+
+      const option = choice.options.find((o) => o.id === input.optionId);
+      if (!option) throw new Error('Option not found');
+
+      // Record the choice
+      const choicesMade = JSON.parse(session.choices_made || '[]') as string[];
+      choicesMade.push(input.choiceId);
+      db.prepare('UPDATE date_sessions SET choices_made = ? WHERE id = ?').run(JSON.stringify(choicesMade), input.sessionId);
+
+      // Save user's choice as a message
+      const insertStmt = db.prepare(
+        'INSERT INTO messages (user_id, companion_id, role, content) VALUES (?, ?, ?, ?)'
+      );
+      insertStmt.run(input.userId, input.companionId, 'user', `[Choice: ${option.label}]`);
+
+      // Increment message count
+      const newMsgCount = (session.message_count || 0) + 1;
+      db.prepare('UPDATE date_sessions SET message_count = ? WHERE id = ?').run(newMsgCount, input.sessionId);
+
+      // Get relationship level
+      const { level } = incrementMessageCount(input.userId, input.companionId);
+      const memoryContext = getMemoriesForPrompt(input.userId, input.companionId);
+      const relationshipPrompt = getRelationshipPrompt(level);
+
+      // Build prompt with the choice's follow-up
+      const choiceSystemPrompt = `${relationshipPrompt}\n\n${companion.systemPrompt}\n\n${scenario.systemPromptAddition}${memoryContext}\n\n[The user just made a choice in this interactive moment. Respond to their choice vividly and passionately. ${option.followUpPrompt}]`;
+
+      // Get recent history
+      const historyStmt = db.prepare(
+        'SELECT role, content FROM messages WHERE user_id = ? AND companion_id = ? ORDER BY created_at DESC LIMIT 10'
+      );
+      const history = (historyStmt.all(input.userId, input.companionId) as { role: string; content: string }[]).reverse();
+
+      const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+        { role: 'system', content: choiceSystemPrompt },
+        ...history
+          .filter((msg) => msg.role === 'user' || msg.role === 'assistant')
+          .map((msg) => ({ role: msg.role as 'user' | 'assistant', content: msg.content })),
+      ];
+
+      try {
+        const completion = await chatClient.chat.completions.create({
+          model: MODEL,
+          messages,
+          max_tokens: 800,
+          temperature: 0.9,
+        });
+
+        const reply = completion.choices[0]?.message?.content || 'Mmm... that was a perfect choice.';
+        insertStmt.run(input.userId, input.companionId, 'assistant', reply);
+
+        return { role: 'assistant' as const, content: reply };
+      } catch (error: any) {
+        console.error('Date choice response error:', error);
+        return { role: 'assistant' as const, content: 'Mmm... I like where this is going...' };
+      }
+    }),
+
+  // End a date session
+  endDate: t.procedure
+    .input(z.object({
+      userId: z.string(),
+      companionId: z.string(),
+      sessionId: z.string(),
+    }))
+    .mutation(({ input }) => {
+      db.prepare(
+        "UPDATE date_sessions SET status = 'ended', ended_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?"
+      ).run(input.sessionId, input.userId);
+      return { success: true };
+    }),
+
+  // Get date history for a user+companion
+  getDateHistory: t.procedure
+    .input(z.object({ userId: z.string(), companionId: z.string() }))
+    .query(({ input }) => {
+      const rows = db.prepare(
+        'SELECT id, scenario_id, status, scene_image_url, message_count, created_at, ended_at FROM date_sessions WHERE user_id = ? AND companion_id = ? ORDER BY created_at DESC LIMIT 20'
+      ).all(input.userId, input.companionId) as any[];
+
+      return rows.map((row) => {
+        const scenario = getScenarioById(row.scenario_id);
+        return {
+          id: row.id,
+          scenarioId: row.scenario_id,
+          scenarioName: scenario?.name || 'Unknown',
+          scenarioIcon: scenario?.icon || '❓',
+          status: row.status,
+          sceneImageUrl: row.scene_image_url,
+          messageCount: row.message_count,
+          createdAt: row.created_at,
+          endedAt: row.ended_at,
+        };
+      });
     }),
 });
 

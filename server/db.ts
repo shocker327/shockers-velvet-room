@@ -126,6 +126,29 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_voice_messages_user_companion
     ON voice_messages(user_id, companion_id, created_at);
+
+  CREATE TABLE IF NOT EXISTS date_sessions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    companion_id TEXT NOT NULL,
+    scenario_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    scene_image_url TEXT,
+    choices_made TEXT DEFAULT '[]',
+    message_count INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    ended_at DATETIME
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_date_sessions_user_companion
+    ON date_sessions(user_id, companion_id, status);
+
+  CREATE TABLE IF NOT EXISTS user_tiers (
+    user_id TEXT PRIMARY KEY,
+    tier TEXT NOT NULL DEFAULT 'paid',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 // Migration: add avatar_image_url column if it doesn't exist
