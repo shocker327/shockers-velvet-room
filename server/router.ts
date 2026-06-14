@@ -320,6 +320,7 @@ function getCustomCompanionAsCompanion(row: any): Companion {
     elevenLabsVoiceId: row.voice_id,
     visualDescription: row.visual_description,
     systemPrompt: row.system_prompt,
+    avatarImageUrl: row.avatar_image_url || undefined,
   };
 }
 
@@ -731,14 +732,42 @@ export const appRouter = t.router({
         outfit: z.string(),
       })
     )
-    .mutation(({ input }) => {
+    .mutation(async ({ input }) => {
       const id = `custom-${uuidv4()}`;
       const systemPrompt = generateSystemPrompt(input);
       const visualDescription = generateVisualDescription(input);
 
+      // Generate avatar image via fal.ai
+      let avatarImageUrl: string | null = null;
+      try {
+        const falKey = process.env.FAL_KEY;
+        if (falKey) {
+          const imagePrompt = `beautiful ${input.age_type === 'young' ? 'young woman in her 20s' : 'mature woman in her 30s-40s'}, ${input.ethnicity}, ${input.body_type} body, ${input.bust_size} bust, ${input.hair_color} ${input.hair_style} hair, ${input.eye_color} eyes, wearing ${input.outfit}, seductive pose, sexy, photorealistic, professional photography, beautiful lighting, bedroom or luxury setting, looking at camera, alluring expression`;
+          const falResponse = await fetch('https://fal.run/fal-ai/flux/dev', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Key ${falKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              prompt: imagePrompt,
+              image_size: 'portrait_4_3',
+              num_images: 1,
+              enable_safety_checker: false,
+            }),
+          });
+          if (falResponse.ok) {
+            const falData = await falResponse.json();
+            avatarImageUrl = falData?.images?.[0]?.url || null;
+          }
+        }
+      } catch (err) {
+        console.error('Failed to generate avatar image:', err);
+      }
+
       db.prepare(
-        `INSERT INTO custom_companions (id, user_id, name, age_type, ethnicity, body_type, bust_size, butt_size, hair_color, hair_style, eye_color, voice_id, voice_name, occupation, hobbies, personality_traits, relationship_type, outfit, system_prompt, visual_description)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO custom_companions (id, user_id, name, age_type, ethnicity, body_type, bust_size, butt_size, hair_color, hair_style, eye_color, voice_id, voice_name, occupation, hobbies, personality_traits, relationship_type, outfit, system_prompt, visual_description, avatar_image_url)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         id,
         input.userId,
@@ -759,10 +788,11 @@ export const appRouter = t.router({
         input.relationship_type,
         input.outfit,
         systemPrompt,
-        visualDescription
+        visualDescription,
+        avatarImageUrl
       );
 
-      return { id, name: input.name };
+      return { id, name: input.name, avatarImageUrl };
     }),
 
   // Get user's custom companions

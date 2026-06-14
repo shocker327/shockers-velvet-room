@@ -103,11 +103,22 @@ db.exec(`
     outfit TEXT NOT NULL,
     system_prompt TEXT NOT NULL,
     visual_description TEXT NOT NULL,
+    avatar_image_url TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  -- Add avatar_image_url column if it doesn't exist (migration for existing DBs)
+  -- SQLite doesn't support IF NOT EXISTS for ALTER TABLE, so we handle this in code
 
   CREATE INDEX IF NOT EXISTS idx_custom_companions_user
     ON custom_companions(user_id);
 `);
+
+// Migration: add avatar_image_url column if it doesn't exist
+try {
+  db.prepare('SELECT avatar_image_url FROM custom_companions LIMIT 1').get();
+} catch {
+  db.exec('ALTER TABLE custom_companions ADD COLUMN avatar_image_url TEXT');
+}
 
 export default db;

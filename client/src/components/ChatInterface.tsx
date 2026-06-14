@@ -15,6 +15,7 @@ interface ChatInterfaceProps {
   companionAvatar: string;
   gradient: string;
   theme?: string;
+  avatarImageUrl?: string;
 }
 
 // ─── Theme backgrounds for each companion ───────────────────────────────────
@@ -40,10 +41,23 @@ const themeBackgroundImages: Record<string, string> = {
 };
 
 // Hook to check if a background image actually exists (returns null if 404)
-function useBackgroundImage(theme?: string): string | null {
+function useBackgroundImage(theme?: string, customImageUrl?: string): string | null {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
 
   useEffect(() => {
+    // If a custom image URL is provided (from fal.ai), use it directly
+    if (customImageUrl) {
+      const img = new Image();
+      img.onload = () => {
+        if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+          setImageUrl(customImageUrl);
+        }
+      };
+      img.onerror = () => setImageUrl(null);
+      img.src = customImageUrl;
+      return;
+    }
+
     if (!theme || !themeBackgroundImages[theme]) {
       setImageUrl(null);
       return;
@@ -62,7 +76,7 @@ function useBackgroundImage(theme?: string): string | null {
       setImageUrl(null);
     };
     img.src = url;
-  }, [theme]);
+  }, [theme, customImageUrl]);
 
   return imageUrl;
 }
@@ -313,7 +327,7 @@ function DailyMessageBanner({ message, companionName }: { message: string; compa
 }
 
 // ─── Main Chat Interface ─────────────────────────────────────────────────────
-export default function ChatInterface({ companionId, companionName, companionAvatar, gradient, theme }: ChatInterfaceProps) {
+export default function ChatInterface({ companionId, companionName, companionAvatar, gradient, theme, avatarImageUrl }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -431,7 +445,7 @@ export default function ChatInterface({ companionId, companionName, companionAva
     }
   };
 
-  const bgImageUrl = useBackgroundImage(theme);
+  const bgImageUrl = useBackgroundImage(theme, avatarImageUrl);
 
   return (
     <div className={`relative flex flex-col h-[calc(100vh-4rem)] max-w-4xl mx-auto ${bgClass}`}>

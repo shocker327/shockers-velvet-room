@@ -28,6 +28,7 @@ export default function Chat() {
         companionAvatar={companion.avatar}
         gradient={companion.gradient}
         theme={companion.theme}
+        avatarImageUrl={companion.avatarImageUrl}
       />
     </div>
   );

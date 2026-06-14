@@ -10,6 +10,7 @@ export interface Companion {
   voice: string;
   elevenLabsVoiceId: string;
   visualDescription: string;
+  avatarImageUrl?: string;
 }
 
 // Appended to every companion's system prompt to prevent the model from
