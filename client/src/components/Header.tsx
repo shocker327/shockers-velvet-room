@@ -33,6 +33,9 @@ export default function Header() {
                 </span>
               )}
             </Link>
+            <Link to="/create-companion" className="text-gray-300 hover:text-velvet-gold transition-colors flex items-center gap-1">
+              <span className="text-velvet-gold">+</span> Create
+            </Link>
             <Link to="/pricing" className="text-gray-300 hover:text-velvet-gold transition-colors">
               Pricing
             </Link>
@@ -69,6 +72,9 @@ export default function Header() {
                   {unreadCount}
                 </span>
               )}
+            </Link>
+            <Link to="/create-companion" onClick={() => setMobileOpen(false)} className="block text-gray-300 hover:text-velvet-gold">
+              + Create Companion
             </Link>
             <Link to="/pricing" onClick={() => setMobileOpen(false)} className="block text-gray-300 hover:text-velvet-gold">
               Pricing

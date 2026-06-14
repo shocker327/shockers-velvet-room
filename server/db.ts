@@ -81,6 +81,33 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_daily_messages_user_date
     ON daily_messages(user_id, companion_id, generated_date);
+
+  CREATE TABLE IF NOT EXISTS custom_companions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    age_type TEXT NOT NULL,
+    ethnicity TEXT NOT NULL,
+    body_type TEXT NOT NULL,
+    bust_size TEXT NOT NULL,
+    butt_size TEXT NOT NULL,
+    hair_color TEXT NOT NULL,
+    hair_style TEXT NOT NULL,
+    eye_color TEXT NOT NULL,
+    voice_id TEXT NOT NULL,
+    voice_name TEXT NOT NULL,
+    occupation TEXT NOT NULL,
+    hobbies TEXT NOT NULL,
+    personality_traits TEXT NOT NULL,
+    relationship_type TEXT NOT NULL,
+    outfit TEXT NOT NULL,
+    system_prompt TEXT NOT NULL,
+    visual_description TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_custom_companions_user
+    ON custom_companions(user_id);
 `);
 
 export default db;

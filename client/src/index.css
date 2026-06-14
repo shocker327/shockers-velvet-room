@@ -53,3 +53,13 @@
 .message-enter {
   animation: fadeIn 0.3s ease-out;
 }
+
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out;
+}
+
+/* Spin animation for loading spinners */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

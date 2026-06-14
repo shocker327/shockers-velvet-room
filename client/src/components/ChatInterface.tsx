@@ -27,6 +27,8 @@ const themeBackgrounds: Record<string, string> = {
     'bg-gradient-to-b from-indigo-950/80 via-purple-950/60 to-velvet-dark',
   'luxury-office':
     'bg-gradient-to-b from-rose-950/70 via-zinc-950/60 to-velvet-dark',
+  'custom-companion':
+    'bg-gradient-to-b from-amber-950/60 via-purple-950/50 to-velvet-dark',
 };
 
 // ─── Background image mapping (generated on first deploy) ───────────────────
@@ -81,6 +83,10 @@ const themeOverlays: Record<string, React.CSSProperties> = {
   'luxury-office': {
     background:
       'radial-gradient(ellipse at 60% 20%, rgba(244,63,94,0.10) 0%, transparent 50%), radial-gradient(ellipse at 40% 80%, rgba(161,161,170,0.06) 0%, transparent 50%)',
+  },
+  'custom-companion': {
+    background:
+      'radial-gradient(ellipse at 50% 20%, rgba(212,175,55,0.12) 0%, transparent 60%), radial-gradient(ellipse at 70% 80%, rgba(168,85,247,0.08) 0%, transparent 50%)',
   },
 };
 

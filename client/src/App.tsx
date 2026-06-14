@@ -14,6 +14,7 @@ import Chat from './pages/Chat';
 import Pricing from './pages/Pricing';
 import Terms from './pages/Terms';
 import Privacy from './pages/Privacy';
+import CreateCompanion from './pages/CreateCompanion';
 
 function App() {
   const [queryClient] = useState(() => new QueryClient());
@@ -35,6 +36,7 @@ function App() {
                 <Route path="/" element={<Landing />} />
                 <Route path="/companions" element={<Companions />} />
                 <Route path="/chat/:companionId" element={<Chat />} />
+                <Route path="/create-companion" element={<CreateCompanion />} />
                 <Route path="/pricing" element={<Pricing />} />
                 <Route path="/terms" element={<Terms />} />
                 <Route path="/privacy" element={<Privacy />} />
